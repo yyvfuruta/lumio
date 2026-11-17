@@ -24,11 +24,11 @@ a:hover { text-decoration: underline; }
 .library { padding: 0 6px 25px; }
 .date-group { margin: 25px 0 30px; }
 .date-heading { padding: 3px 0; margin: 0 0 12px; border-bottom: 1px solid #444; color: var(--text); font-size: 14px; font-weight: 400; }
-.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 2px; }
 .photo { position: relative; min-width: 0; }
 .photo-open { display: block; background: transparent; width: 100%; border: 0; padding: 0; aspect-ratio: 4/3; }
 .photo-open:hover { background: transparent; }
-.photo-open img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.photo-open img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .photo-name { position: absolute; bottom: 0; left: 0; right: 0; padding: 3px 5px; background: #222e; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-size: 10px; opacity: 0; }
 .photo-fav { position: absolute; right: 5px; top: 5px; padding: 0 5px; font-size: 16px; background: #222d; opacity: 0; }
 .photo:hover .photo-name, .photo:focus-within .photo-name, .photo:hover .photo-fav, .photo:focus-within .photo-fav, .photo-fav.saved { opacity: 1; }
@@ -85,7 +85,7 @@ dialog::backdrop { background: #000e; }
   .tab-tools { margin-left: auto; gap: 5px; }
   .tab-tools input { width: 110px; }
   .library { padding: 0 0 20px; }
-  .photo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .photo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
   .date-group { margin: 18px 0 22px; }
   .usage-table th { width: 48%; }
   .usage-table th, .usage-table td { padding: 6px 4px; font-size: 11px; }
