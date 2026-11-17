@@ -13,6 +13,7 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ import (
 	"gocloud.dev/gcerrors"
 )
 
-var errImage = errors.New("use a valid JPEG, PNG, GIF, or HEIC image up to 40 megapixels")
+var errImage = errors.New("use a valid JPEG, PNG, GIF, or HEIC image up to 40 megapixels, or an MP4 (H.264/AAC) or WebM (VP8/VP9/AV1 with Opus/Vorbis) video")
 var errTooLarge = errors.New("file exceeds the upload limit")
 
 const maxImagePixels = 40_000_000
@@ -40,12 +41,13 @@ type Photo struct {
 	Height      int       `json:"height"`
 	AddedAt     time.Time `json:"addedAt"`
 	Favorite    bool      `json:"favorite"`
+	Duration    float64   `json:"duration,omitempty"`
 }
 
-const columns = "id,name,content_type,size,thumb_size,preview_size,width,height,added_at,favorite"
+const columns = "id,name,content_type,size,thumb_size,preview_size,width,height,added_at,favorite,duration"
 
 func scanPhoto(row pgx.Row) (p Photo, err error) {
-	err = row.Scan(&p.ID, &p.Name, &p.Type, &p.Size, &p.ThumbSize, &p.PreviewSize, &p.Width, &p.Height, &p.AddedAt, &p.Favorite)
+	err = row.Scan(&p.ID, &p.Name, &p.Type, &p.Size, &p.ThumbSize, &p.PreviewSize, &p.Width, &p.Height, &p.AddedAt, &p.Favorite, &p.Duration)
 	return
 }
 
@@ -81,42 +83,12 @@ func (a *App) addPhoto(ctx context.Context, name string, src io.Reader) (Photo, 
 	if _, err := f.Seek(0, 0); err != nil {
 		return Photo{}, false, err
 	}
-	cfg, format, err := image.DecodeConfig(f)
-	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
-		return Photo{}, false, errImage
-	}
-	mime := map[string]string{"jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "heic": "image/heic"}[format]
-	if mime == "" {
-		return Photo{}, false, errImage
-	}
-	if _, err := f.Seek(0, 0); err != nil {
-		return Photo{}, false, err
-	}
-	var img image.Image
-	if format == "heic" {
-		img, err = heic.Decode(f, heic.Options{AutoRotate: true, FrameSizeLimit: maxImagePixels, Threads: 2})
-	} else {
-		img, _, err = image.Decode(f)
-	}
+	media, err := prepareMedia(ctx, f)
 	if err != nil {
-		return Photo{}, false, errImage
-	}
-	cfg.Width, cfg.Height = img.Bounds().Dx(), img.Bounds().Dy()
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
-		return Photo{}, false, errImage
-	}
-	var preview bytes.Buffer
-	if format == "heic" {
-		img = resizeImage(img, 2048)
-		if err := jpeg.Encode(&preview, img, &jpeg.Options{Quality: 90}); err != nil {
-			return Photo{}, false, err
-		}
-	}
-	var thumb bytes.Buffer
-	if err := jpeg.Encode(&thumb, thumbnail(img), &jpeg.Options{Quality: 82}); err != nil {
 		return Photo{}, false, err
 	}
-	p := Photo{ID: hex.EncodeToString(hash.Sum(nil)), Name: filepath.Base(strings.ReplaceAll(name, "\\", "/")), Type: mime, Size: n, ThumbSize: int64(thumb.Len()), PreviewSize: int64(preview.Len()), Width: cfg.Width, Height: cfg.Height}
+	thumb, preview := *bytes.NewBuffer(media.thumb), *bytes.NewBuffer(media.preview)
+	p := Photo{ID: hex.EncodeToString(hash.Sum(nil)), Name: filepath.Base(strings.ReplaceAll(name, "\\", "/")), Type: media.typ, Size: n, ThumbSize: int64(thumb.Len()), PreviewSize: int64(preview.Len()), Width: media.width, Height: media.height, Duration: media.duration}
 	if len(p.Name) > 255 {
 		p.Name = "photo"
 	}
@@ -153,8 +125,8 @@ func (a *App) addPhoto(ctx context.Context, name string, src io.Reader) (Photo, 
 			return Photo{}, false, err
 		}
 	}
-	p, err = scanPhoto(tx.QueryRow(ctx, `INSERT INTO lumio_photos (id,name,content_type,size,thumb_size,preview_size,width,height)
-	 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET name=excluded.name,content_type=excluded.content_type,size=excluded.size,thumb_size=excluded.thumb_size,preview_size=excluded.preview_size,width=excluded.width,height=excluded.height,added_at=now(),favorite=false,deleted_at=NULL RETURNING `+columns, p.ID, p.Name, p.Type, p.Size, p.ThumbSize, p.PreviewSize, p.Width, p.Height))
+	p, err = scanPhoto(tx.QueryRow(ctx, `INSERT INTO lumio_photos (id,name,content_type,size,thumb_size,preview_size,width,height,duration)
+	 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET name=excluded.name,content_type=excluded.content_type,size=excluded.size,thumb_size=excluded.thumb_size,preview_size=excluded.preview_size,width=excluded.width,height=excluded.height,duration=excluded.duration,added_at=now(),favorite=false,deleted_at=NULL RETURNING `+columns, p.ID, p.Name, p.Type, p.Size, p.ThumbSize, p.PreviewSize, p.Width, p.Height, p.Duration))
 	if err != nil {
 		return Photo{}, false, err
 	}
@@ -237,4 +209,59 @@ func resizeImage(src image.Image, limit int) image.Image {
 		}
 	}
 	return dst
+}
+
+type preparedMedia struct {
+	typ            string
+	width, height  int
+	duration       float64
+	thumb, preview []byte
+}
+
+func prepareMedia(ctx context.Context, f *os.File) (preparedMedia, error) {
+	var header [512]byte
+	n, err := f.ReadAt(header[:], 0)
+	if err != nil && err != io.EOF {
+		return preparedMedia{}, err
+	}
+	typ := http.DetectContentType(header[:n])
+	if typ == "video/mp4" || typ == "video/webm" {
+		return prepareVideo(ctx, f.Name(), typ)
+	}
+	cfg, format, err := image.DecodeConfig(f)
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
+		return preparedMedia{}, errImage
+	}
+	mime := map[string]string{"jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "heic": "image/heic"}[format]
+	if mime == "" {
+		return preparedMedia{}, errImage
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return preparedMedia{}, err
+	}
+	var img image.Image
+	if format == "heic" {
+		img, err = heic.Decode(f, heic.Options{AutoRotate: true, FrameSizeLimit: maxImagePixels, Threads: 2})
+	} else {
+		img, _, err = image.Decode(f)
+	}
+	if err != nil {
+		return preparedMedia{}, errImage
+	}
+	cfg.Width, cfg.Height = img.Bounds().Dx(), img.Bounds().Dy()
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
+		return preparedMedia{}, errImage
+	}
+	var preview bytes.Buffer
+	if format == "heic" {
+		img = resizeImage(img, 2048)
+		if err := jpeg.Encode(&preview, img, &jpeg.Options{Quality: 90}); err != nil {
+			return preparedMedia{}, err
+		}
+	}
+	var thumb bytes.Buffer
+	if err := jpeg.Encode(&thumb, thumbnail(img), &jpeg.Options{Quality: 82}); err != nil {
+		return preparedMedia{}, err
+	}
+	return preparedMedia{typ: mime, width: cfg.Width, height: cfg.Height, thumb: thumb.Bytes(), preview: preview.Bytes()}, nil
 }

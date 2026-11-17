@@ -1,3 +1,5 @@
+Video processing and video tests require FFmpeg and FFprobe on PATH. The runtime container includes both tools.
+
 # Development and releases
 
 ```sh

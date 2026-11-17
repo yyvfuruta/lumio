@@ -1,7 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false };
+const dayPhotos = new Map();
+let selectingDay = false;
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const isVideo = photo => photo.type.startsWith('video/');
+const durationFormat = seconds => { const total = Math.max(0, Math.floor(seconds)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`; };
 const sizeFormat = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
 
 async function api(path, options = {}) {
@@ -28,10 +32,10 @@ $('logout').addEventListener('click', async () => {
 });
 
 function setView(favorite) {
-  state.view = 'photos'; $('selection-toggle').hidden = false; $('photo-panel').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
+  $('page-title').textContent = favorite ? 'Favorites' : 'All photos'; state.view = 'photos'; $('photo-panel').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
   state.favorite = favorite; $('nav-all').classList.toggle('active', !favorite); $('nav-favorites').classList.toggle('active', favorite);
   $('nav-all').setAttribute('aria-current', favorite ? 'false' : 'page'); $('nav-favorites').setAttribute('aria-current', favorite ? 'page' : 'false');
-  const title = favorite ? 'favorites' : 'photos'; $('page-title').textContent = title;
+  const title = favorite ? 'Favorites' : 'All photos'; $('page-title').textContent = title;
   load(true);
 }
 $('nav-all').addEventListener('click', () => setView(false)); $('nav-favorites').addEventListener('click', () => setView(true));
@@ -42,7 +46,7 @@ async function load(reset = false) {
   if (!reset && state.loading) return;
   const request = ++state.request; state.loading = true;
   $('load-more').disabled = true;
-  if (reset) { state.photos = []; state.cursor = ''; render(); loadTimeline(); }
+  if (reset) { dayPhotos.clear(); state.photos = []; state.cursor = ''; render(); loadTimeline(); }
   const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite) });
   if (state.cursor) params.set('cursor', state.cursor);
   if (state.period) { const range = periodRange(state.period); params.set('from', range.from); params.set('until', range.until); }
@@ -63,21 +67,27 @@ function render() {
   });
   for (const [date, items] of groups) {
     const section = document.createElement('section'); section.className = 'date-group';
-    const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = date;
+    const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = friendlyDate(items[0].photo.addedAt);
+    const dayLabel = document.createElement('label'); dayLabel.className = 'day-selection';
+    const dayCheck = document.createElement('input'); dayCheck.type = 'checkbox'; dayCheck.className = 'day-checkbox'; dayCheck.dataset.date = date;
+    dayCheck.setAttribute('aria-label', `Select all photos from ${friendlyDate(items[0].photo.addedAt)}`);
+    dayCheck.addEventListener('change', () => selectDay(date, items[0].photo.addedAt, dayCheck.checked));
+    dayLabel.append(dayCheck); heading.prepend(dayLabel);
     const grid = document.createElement('div'); grid.className = 'photo-grid'; section.append(heading, grid);
     for (const { photo, index } of items) {
       const card = document.createElement('article'); card.className = 'photo'; card.dataset.photoId = photo.id;
       const open = document.createElement('button'); open.className = 'photo-open'; open.setAttribute('aria-label', `Open ${photo.name}`);
       const img = document.createElement('img'); img.src = `/api/v1/photos/${photo.id}/thumbnail`; img.alt = photo.name; img.loading = 'lazy'; img.decoding = 'async'; open.append(img); open.addEventListener('click', () => { if (state.selecting) selectPhoto(photo.id, !state.selection.has(photo.id)); else showPhoto(index); });
-      const favorite = document.createElement('button'); favorite.className = `photo-fav${photo.favorite ? ' saved' : ''}`; favorite.textContent = photo.favorite ? '★' : '☆'; favorite.setAttribute('aria-label', photo.favorite ? 'Remove from favorites' : 'Add to favorites'); favorite.setAttribute('aria-pressed', String(photo.favorite)); favorite.addEventListener('click', () => toggleFavorite(photo));
+      if (isVideo(photo)) { const badge = document.createElement('span'); badge.className = 'video-badge'; badge.textContent = `▶ ${durationFormat(photo.duration)}`; badge.setAttribute('aria-label', `Video, ${durationFormat(photo.duration)}`); card.append(badge); }
+      const favorite = document.createElement('button'); favorite.className = `photo-fav${photo.favorite ? ' saved' : ''}`; favorite.textContent = photo.favorite ? '♥' : '♡'; favorite.setAttribute('aria-label', photo.favorite ? 'Remove from favorites' : 'Add to favorites'); favorite.setAttribute('aria-pressed', String(photo.favorite)); favorite.addEventListener('click', () => toggleFavorite(photo));
       const name = document.createElement('span'); name.className = 'photo-name'; name.textContent = photo.name; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'photo-checkbox'; checkbox.dataset.photoId = photo.id; checkbox.setAttribute('aria-label', `Select ${photo.name}`); checkbox.addEventListener('change', () => selectPhoto(photo.id, checkbox.checked)); card.append(open, checkbox, favorite, name); grid.append(card);
     }
     gallery.append(section);
   }
-  $('page-title').textContent = `${state.favorite ? 'favorites' : 'photos'}${state.period ? ' / ' + state.period : ''}`;
+  $('page-title').textContent = `${state.favorite ? 'Favorites' : 'All photos'}${state.period ? ' / ' + state.period : ''}`;
   $('load-more').hidden = !state.cursor; $('empty').hidden = state.photos.length !== 0 || state.loading;
   $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : state.period ? 'No photos in this period.' : 'No photos yet.';
-  $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload a few photos to get started.';
+  $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the heart on a photo or video to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload photos or videos to get started.';
   $('empty-upload').hidden = state.favorite || !!state.query;
   renderSelection();
 }
@@ -104,7 +114,7 @@ $('file-input').addEventListener('change', async () => {
   }
   state.uploading = false; $('upload-button').disabled = false; $('empty-upload').disabled = false;
   await load(true);
-  status(`${added} ${added === 1 ? 'photo added' : 'photos added'}.${duplicates ? ` ${duplicates} already in the library.` : ''}${errors.length ? '\n' + errors.join('\n') : ''}`, errors.length > 0);
+  status(`${added} ${added === 1 ? 'file added' : 'files added'}.${duplicates ? ` ${duplicates} already in the library.` : ''}${errors.length ? '\n' + errors.join('\n') : ''}`, errors.length > 0);
 });
 
 function showPhoto(index) {
@@ -112,13 +122,25 @@ function showPhoto(index) {
   $('viewer-position').textContent = `${index + 1} / ${state.photos.length}`;
   state.selected = index; const photo = state.photos[index];
   $('viewer-title').textContent = photo.name; $('viewer-meta').textContent = `${photo.width} × ${photo.height} · ${sizeFormat(photo.size)} · Added ${dateFormat.format(new Date(photo.addedAt))}`;
-  $('viewer-image').src = `/api/v1/photos/${photo.id}/preview`; $('viewer-image').alt = photo.name;
-  $('viewer-favorite').textContent = photo.favorite ? '★ starred' : '☆ favorite'; $('viewer-favorite').setAttribute('aria-pressed', String(photo.favorite));
+  const video = $('viewer-video'), image = $('viewer-image');
+  const videoPhoto = isVideo(photo);
+  const source = `/api/v1/photos/${photo.id}/${videoPhoto ? 'original' : 'preview'}`;
+  image.hidden = videoPhoto; video.hidden = !videoPhoto;
+  if (videoPhoto) {
+    image.removeAttribute('src');
+    if (video.getAttribute('src') !== source) { video.pause(); video.src = source; video.poster = `/api/v1/photos/${photo.id}/thumbnail`; video.load(); }
+    video.setAttribute('aria-label', photo.name);
+  } else {
+    resetVideo(); image.src = source; image.alt = photo.name;
+  }
+  $('viewer-favorite').textContent = photo.favorite ? '♥ Remove from favorites' : '♡ Add to favorites'; $('viewer-favorite').setAttribute('aria-pressed', String(photo.favorite));
   $('download').href = `/api/v1/photos/${photo.id}/original?download=1`; $('viewer-menu').open = false; $('viewer').setAttribute('aria-label', photo.name);
-  $('viewer-error').textContent = ''; if (!$('viewer').open) $('viewer').showModal(); $('viewer-image').focus({ preventScroll: true });
+  $('viewer-error').textContent = ''; if (!$('viewer').open) $('viewer').showModal(); (videoPhoto ? video : image).focus({ preventScroll: true });
 }
 $('viewer-close').addEventListener('click', () => $('viewer').close());
-$('viewer').addEventListener('close', () => { $('viewer-image').removeAttribute('src'); });
+$('viewer').addEventListener('close', () => { $('viewer-image').removeAttribute('src'); resetVideo(); });
+function resetVideo() { const video = $('viewer-video'); video.pause(); video.removeAttribute('src'); video.removeAttribute('poster'); video.load(); }
+$('viewer-video').addEventListener('error', () => { if (!$('viewer-video').hidden && $('viewer-video').hasAttribute('src')) { $('viewer-menu').open = true; $('viewer-error').textContent = 'This video could not be played. Try downloading the original.'; } });
 
 
 async function toggleFavorite(photo) {
@@ -149,6 +171,7 @@ document.addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey || event.target.matches('input, textarea, select, [contenteditable]')) return;
   if ($('app').hidden || $('help').open) return;
   if ($('viewer').open) {
+    if (event.target.closest('video')) return;
     if (['h', 'ArrowLeft'].includes(event.key)) { event.preventDefault(); showPhoto(state.selected - 1); }
     if (['l', 'ArrowRight'].includes(event.key)) { event.preventDefault(); showPhoto(state.selected + 1); }
     if (event.key === ' ' && !event.target.closest('button, a, summary')) { event.preventDefault(); toggleFavorite(state.photos[state.selected]); }
@@ -193,12 +216,12 @@ async function refreshStatus() {
       $('usage-available').textContent = byteSize(data.disk.available);
     }
     $('disk-note').textContent = data.disk ? 'Volume usage includes everything on the filesystem, not just this library.' : 'Filesystem capacity is not reported for this storage provider or platform.';
-    $('status-checked').textContent = `checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB')}`;
-  } catch (error) { $('status-error').textContent = error.message; $('status-checked').textContent = 'status unavailable'; }
+    $('status-checked').textContent = `Last checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB')}`;
+  } catch (error) { $('status-error').textContent = error.message; $('status-checked').textContent = 'Status unavailable'; }
   finally { $('refresh-status').disabled = false; }
 }
 $('nav-status').addEventListener('click', () => {
-  state.view = 'status'; $('selection-toggle').hidden = true; $('photo-panel').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
+  $('page-title').textContent = 'Storage and status'; state.view = 'status'; $('photo-panel').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
   for (const id of ['nav-all', 'nav-favorites']) { $(id).classList.remove('active'); $(id).removeAttribute('aria-current'); }
   $('nav-status').classList.add('active'); $('nav-status').setAttribute('aria-current', 'page');
   refreshStatus();
@@ -238,7 +261,7 @@ async function loadTimeline() {
       if (period === state.period) { node.classList.add('selected'); node.setAttribute('aria-current', 'date'); }
       node.addEventListener('click', () => choosePeriod(period)); return node;
     };
-    rail.append(button('all', '', 'Show all upload dates', 'timeline-all'));
+    rail.append(button('All', '', 'Show all upload dates', 'timeline-all'));
     let year;
     const monthFormat = new Intl.DateTimeFormat('en', { month: 'short' });
     for (const item of data.months) {
@@ -252,11 +275,16 @@ async function loadTimeline() {
 
 function renderSelection() {
   $('photo-panel').classList.toggle('selecting', state.selecting);
-  $('selection-toggle').textContent = state.selecting ? 'cancel' : 'select';
-  $('selection-toggle').setAttribute('aria-pressed', String(state.selecting));
   $('selection-bar').hidden = !state.selecting;
   $('selection-count').textContent = `${state.selection.size} selected`;
   $('download-selected').disabled = !state.selection.size || state.downloading;
+  document.querySelectorAll('.day-checkbox').forEach(node => {
+    const ids = dayPhotos.get(node.dataset.date) || state.photos.filter(photo => dateFormat.format(new Date(photo.addedAt)) === node.dataset.date).map(photo => photo.id);
+    const selected = ids.filter(id => state.selection.has(id)).length;
+    node.checked = ids.length > 0 && selected === ids.length && (dayPhotos.has(node.dataset.date) || !state.cursor);
+    node.indeterminate = selected > 0 && !node.checked;
+    node.disabled = selectingDay;
+  });
   document.querySelectorAll('.photo-checkbox').forEach(node => { node.checked = state.selection.has(node.dataset.photoId); });
   document.querySelectorAll('.photo').forEach(node => { node.classList.toggle('selected', state.selection.has(node.dataset.photoId)); });
 }
@@ -266,9 +294,9 @@ function selectPhoto(id, selected) {
   if (selected) state.selection.add(id); else state.selection.delete(id);
   renderSelection();
 }
-$('selection-toggle').addEventListener('click', () => {
-  state.selecting = !state.selecting;
-  if (!state.selecting) state.selection.clear();
+$('cancel-selection').addEventListener('click', () => {
+  state.selecting = false;
+  state.selection.clear();
   renderSelection();
 });
 $('clear-selection').addEventListener('click', () => { state.selection.clear(); renderSelection(); });
@@ -287,3 +315,118 @@ $('download-selected').addEventListener('click', async () => {
   } catch (error) { status(error.message, true); }
   finally { state.downloading = false; renderSelection(); }
 });
+
+// Keep the action menu out of the way after choosing an action.
+$('library-menu').addEventListener('click', event => {
+  if (event.target.closest('button')) $('library-menu').open = false;
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('#library-menu')) $('library-menu').open = false;
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('library-menu').open) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    $('library-menu').open = false;
+    $('library-menu').querySelector('summary').focus();
+  }
+}, true);
+
+function friendlyDate(value) {
+  const date = new Date(value), today = new Date(), yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+}
+$('theme-select').value = document.documentElement.dataset.theme || 'system';
+$('theme-select').addEventListener('change', () => {
+  const theme = $('theme-select').value;
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('lumio-theme', theme); } catch (_) {}
+  updateThemeColor();
+});
+function updateThemeColor() {
+  document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeColor);
+updateThemeColor();
+
+async function selectDay(date, timestamp, selected) {
+  if (selectingDay) return;
+  const request = state.request;
+  selectingDay = true; state.selecting = true; renderSelection();
+  try {
+    let ids = dayPhotos.get(date);
+    if (!ids) {
+      const from = new Date(timestamp); from.setHours(0, 0, 0, 0);
+      const until = new Date(from); until.setDate(until.getDate() + 1);
+      const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite), from: from.toISOString(), until: until.toISOString() });
+      ids = []; let cursor = '';
+      do {
+        if (cursor) params.set('cursor', cursor);
+        const data = await api(`/api/v1/photos?${params}`);
+        if (request !== state.request || $('app').hidden || !state.selecting) return;
+        ids.push(...data.photos.map(photo => photo.id)); cursor = data.nextCursor;
+        if (selected && new Set([...state.selection, ...ids]).size > 1000) throw new Error('Select up to 1000 photos per download.');
+      } while (cursor);
+      dayPhotos.set(date, ids);
+    }
+    if (request !== state.request || $('app').hidden || !state.selecting) return;
+    const next = new Set(state.selection);
+    for (const id of ids) { if (selected) next.add(id); else next.delete(id); }
+    if (next.size > 1000) throw new Error('Select up to 1000 photos per download.');
+    state.selection = next; state.selecting = true;
+  } catch (error) { if (request === state.request) status(error.message, true); }
+  finally { selectingDay = false; renderSelection(); }
+}
+
+// Paint selection with a mouse; touch keeps its normal scrolling behavior.
+let selectionDrag = null, suppressSelectionClick = false, selectionFrame = 0;
+function paintSelection(x, y) {
+  if (!selectionDrag || !state.selecting) return;
+  const card = document.elementFromPoint(x, y)?.closest('.photo');
+  if (!card || selectionDrag.visited.has(card.dataset.photoId)) return;
+  const id = card.dataset.photoId; selectionDrag.visited.add(id);
+  if (selectionDrag.selected && !state.selection.has(id) && state.selection.size >= 1000) {
+    status('Select up to 1000 photos per download.', true); return;
+  }
+  if (selectionDrag.selected) state.selection.add(id); else state.selection.delete(id);
+}
+function dragScroll() {
+  if (!selectionDrag || !state.selecting) return;
+  const { x, y } = selectionDrag;
+  const speed = y < 48 ? -12 : y > innerHeight - 48 ? 12 : 0;
+  if (speed) { window.scrollBy(0, speed); paintSelection(x, y); renderSelection(); }
+  selectionFrame = requestAnimationFrame(dragScroll);
+}
+$('gallery').addEventListener('pointerdown', event => {
+  suppressSelectionClick = false;
+  if (!state.selecting || event.pointerType !== 'mouse' || event.button !== 0 || !event.target.closest('.photo-open, .photo-checkbox')) return;
+  const card = event.target.closest('.photo'); if (!card) return;
+  event.preventDefault();
+  selectionDrag = { pointerId: event.pointerId, selected: !state.selection.has(card.dataset.photoId), visited: new Set(), x: event.clientX, y: event.clientY };
+  suppressSelectionClick = true;
+  card.querySelector('.photo-open').focus({ preventScroll: true });
+  paintSelection(event.clientX, event.clientY); renderSelection();
+  selectionFrame = requestAnimationFrame(dragScroll);
+});
+document.addEventListener('pointermove', event => {
+  if (!selectionDrag || selectionDrag.pointerId !== event.pointerId) return;
+  if (!(event.buttons & 1) || !state.selecting) { endSelectionDrag(); return; }
+  const { x, y } = selectionDrag;
+  const steps = Math.max(1, Math.ceil(Math.hypot(event.clientX - x, event.clientY - y) / 8));
+  for (let i = 1; i <= steps; i++) paintSelection(x + (event.clientX - x) * i / steps, y + (event.clientY - y) * i / steps);
+  selectionDrag.x = event.clientX; selectionDrag.y = event.clientY;
+  renderSelection();
+});
+function endSelectionDrag() {
+  selectionDrag = null; cancelAnimationFrame(selectionFrame);
+  setTimeout(() => { suppressSelectionClick = false; }, 0);
+}
+document.addEventListener('pointerup', endSelectionDrag);
+document.addEventListener('pointercancel', endSelectionDrag);
+window.addEventListener('blur', endSelectionDrag);
+$('gallery').addEventListener('click', event => {
+  if (suppressSelectionClick) { event.preventDefault(); event.stopImmediatePropagation(); }
+}, true);
+$('gallery').addEventListener('dragstart', event => { if (state.selecting) event.preventDefault(); });

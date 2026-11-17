@@ -1,45 +1,49 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#222222"><meta name="description" content="Lumio — a small, personal photo library."><title>lumio / photos</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#222222"><meta name="description" content="Lumio — a small, personal photo library."><title>Lumio — Photos</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><script src="/theme.js"></script><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
 </head>
 <body>
 <section id="login-screen" class="login-screen" hidden>
-<header class="bar"><span class="brand">lumio</span><span class="muted">/ sign in</span></header>
-<main class="login-main"><form id="login-form"><h1>Personal photo library</h1><p class="muted">Enter your password to continue.</p><label for="password">password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button id="login-button" class="primary" type="submit">sign in ↵</button><p id="login-error" class="error" role="alert"></p></form></main>
+<main class="login-main"><form id="login-form"><h1>Personal photo library</h1><p class="muted">Enter your password to continue.</p><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button id="login-button" class="primary" type="submit">Sign in</button><p id="login-error" class="error" role="alert"></p></form></main>
 
 </section>
 <div id="app" hidden>
-<div class="tabs-row"><nav aria-label="Library"><button class="tab active" id="nav-all" aria-current="page">photos</button><button class="tab" id="nav-favorites">favorites</button><button class="tab" id="nav-status">status</button></nav><div class="tab-tools"><input id="search" type="search" placeholder="search" aria-label="Search filenames" maxlength="200"><button id="selection-toggle" aria-pressed="false">select</button><button id="upload-button">upload</button><button id="logout" class="plain">sign out</button></div><input id="file-input" type="file" accept="image/jpeg,image/png,image/gif,image/heic,image/heif,.heic,.heif" multiple hidden></div>
+<header class="tabs-row">
+<details id="library-menu" class="library-menu"><summary aria-label="Library actions">☰</summary><div class="library-menu-content"><p class="menu-label">Library</p><button class="active" id="nav-all" aria-current="page">Photos</button><button id="nav-favorites">Favorites</button><button id="nav-status">Storage and status</button><label class="theme-control" for="theme-select">Appearance<select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="logout" class="plain">Sign out</button></div></details>
+<div class="tab-tools"><label class="search-field"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" placeholder="Search photos and videos" aria-label="Search filenames" maxlength="200"></label></div>
+<button id="upload-button" class="header-upload" aria-label="Upload photos and videos" title="Upload photos and videos"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg><span>Upload</span></button>
+<input id="file-input" type="file" accept="image/jpeg,image/png,image/gif,image/heic,image/heif,video/mp4,video/webm,.heic,.heif,.mp4,.webm" multiple hidden>
+</header>
 <main class="library">
 <h1 class="sr-only" id="page-title">Photos</h1>
-<div id="status" class="status" role="status" aria-live="polite" hidden></div><div id="photo-panel"><aside id="timeline" class="timeline" aria-label="Browse uploads by date"></aside><div class="photo-content"><div id="selection-bar" class="selection-toolbar" hidden><span id="selection-count" aria-live="polite">0 selected</span><button id="select-shown">select shown</button><button id="clear-selection">clear</button><button id="download-selected" disabled>download selected</button></div><section id="gallery" aria-label="Photos"></section>
-<section id="empty" class="empty" hidden><h2 id="empty-title">No photos yet.</h2><p id="empty-text">Upload a few photos to get started.</p><button id="empty-upload">upload photos</button></section>
-<div class="load-more"><button id="load-more" hidden>older photos</button></div></div></div>
+<div id="status" class="status" role="status" aria-live="polite" hidden></div><div id="photo-panel"><aside id="timeline" class="timeline" aria-label="Browse uploads by date"></aside><div class="photo-content"><div id="selection-bar" class="selection-toolbar" hidden><span id="selection-count" aria-live="polite">0 selected</span><button id="select-shown">Select visible photos</button><button id="clear-selection">Clear selection</button><button id="cancel-selection">Cancel</button><button id="download-selected" disabled>Download selected photos</button></div><section id="gallery" aria-label="Photos"></section>
+<section id="empty" class="empty" hidden><h2 id="empty-title">No photos yet.</h2><p id="empty-text">Upload photos or videos to get started.</p><button id="empty-upload">Upload photos or videos</button></section>
+<div class="load-more"><button id="load-more" hidden>Older photos</button></div></div></div>
 <section id="status-panel" class="status-panel" aria-labelledby="status-title" hidden>
-<div class="panel-heading"><h2 id="status-title">status</h2><button id="refresh-status">refresh</button></div>
+<div class="panel-heading"><h2 id="status-title">Status</h2><button id="refresh-status">Refresh</button></div>
 <p id="status-error" class="error" role="alert"></p>
 <table class="usage-table"><tbody>
-<tr><th scope="row">photos</th><td id="usage-photos">—</td></tr>
-<tr><th scope="row">favorites</th><td id="usage-favorites">—</td></tr>
-<tr><th scope="row">originals</th><td id="usage-originals">—</td></tr>
-<tr><th scope="row">thumbnails</th><td id="usage-thumbnails">—</td></tr>
-<tr id="preview-usage-row" hidden><th scope="row">previews</th><td id="usage-previews">—</td></tr>
-<tr><th scope="row">library size</th><td id="usage-library">—</td></tr>
-<tr><th scope="row">pending deletions</th><td id="usage-pending">—</td></tr>
-<tr><th scope="row">database</th><td id="usage-database">—</td></tr>
-<tr><th scope="row">storage</th><td id="usage-storage">—</td></tr>
-<tr><th scope="row">storage access</th><td id="usage-access">—</td></tr>
-<tr class="disk-row"><th scope="row">volume capacity</th><td id="usage-total">—</td></tr>
-<tr class="disk-row"><th scope="row">volume used</th><td id="usage-used">—</td></tr>
-<tr class="disk-row"><th scope="row">volume available</th><td id="usage-available">—</td></tr>
+<tr><th scope="row">Photos</th><td id="usage-photos">—</td></tr>
+<tr><th scope="row">Favorites</th><td id="usage-favorites">—</td></tr>
+<tr><th scope="row">Originals</th><td id="usage-originals">—</td></tr>
+<tr><th scope="row">Thumbnails</th><td id="usage-thumbnails">—</td></tr>
+<tr id="preview-usage-row" hidden><th scope="row">Previews</th><td id="usage-previews">—</td></tr>
+<tr><th scope="row">Library size</th><td id="usage-library">—</td></tr>
+<tr><th scope="row">Pending deletions</th><td id="usage-pending">—</td></tr>
+<tr><th scope="row">Database</th><td id="usage-database">—</td></tr>
+<tr><th scope="row">Storage</th><td id="usage-storage">—</td></tr>
+<tr><th scope="row">Storage access</th><td id="usage-access">—</td></tr>
+<tr class="disk-row"><th scope="row">Volume capacity</th><td id="usage-total">—</td></tr>
+<tr class="disk-row"><th scope="row">Volume used</th><td id="usage-used">—</td></tr>
+<tr class="disk-row"><th scope="row">Volume available</th><td id="usage-available">—</td></tr>
 </tbody></table>
-<p id="disk-note" class="muted"></p><div class="panel-footer"><span id="status-checked" class="muted"></span><button id="help-button" class="plain">keyboard shortcuts</button></div>
+<p id="disk-note" class="muted"></p><div class="panel-footer"><span id="status-checked" class="muted"></span><button id="help-button" class="plain">Keyboard shortcuts</button></div>
 </section>
 </main>
 
 </div>
-<dialog id="viewer" aria-label="Photo viewer"><div class="viewer-image"><img id="viewer-image" alt="" tabindex="-1"></div><button id="viewer-close" aria-label="Close photo">×</button><details id="viewer-menu"><summary aria-label="Photo actions">···</summary><div class="viewer-menu-content"><h2 id="viewer-title"></h2><p id="viewer-meta"></p><span id="viewer-position" class="muted"></span><div class="viewer-actions"><button id="viewer-favorite">☆ favorite</button><a id="download" class="button" download>download original</a><button id="delete" class="danger">delete</button></div><p id="viewer-error" class="error" role="alert"></p></div></details></dialog>
-<dialog id="help" aria-labelledby="help-title"><div class="bar"><h2 id="help-title">keyboard shortcuts</h2><button id="help-close" aria-label="Close shortcuts">close [esc]</button></div><dl class="help-keys"><dt>h j k l / arrows</dt><dd>move between photos</dd><dt>enter</dt><dd>open focused photo</dd><dt>h / l</dt><dd>previous / next in viewer</dd><dt>u</dt><dd>upload photos</dd><dt>/</dt><dd>search filenames</dd><dt>f</dt><dd>toggle favorites view</dd><dt>space</dt><dd>favorite the open photo</dd><dt>escape</dt><dd>close viewer or help</dd><dt>?</dt><dd>show this help</dd></dl></dialog>
+<dialog id="viewer" aria-label="Photo and video viewer"><div class="viewer-image"><img id="viewer-image" alt="" tabindex="-1"><video id="viewer-video" controls playsinline preload="metadata" hidden></video></div><button id="viewer-close" aria-label="Close photo">×</button><details id="viewer-menu"><summary aria-label="Photo actions">···</summary><div class="viewer-menu-content"><h2 id="viewer-title"></h2><p id="viewer-meta"></p><span id="viewer-position" class="muted"></span><div class="viewer-actions"><button id="viewer-favorite">☆ Add to favorites</button><a id="download" class="button" download>Download original</a><button id="delete" class="danger">Delete</button></div><p id="viewer-error" class="error" role="alert"></p></div></details></dialog>
+<dialog id="help" aria-labelledby="help-title"><div class="bar"><h2 id="help-title">Keyboard shortcuts</h2><button id="help-close" aria-label="Close shortcuts">Close</button></div><dl class="help-keys"><dt>h j k l / arrows</dt><dd>Move between photos</dd><dt>Enter</dt><dd>Open focused photo</dd><dt>h / l</dt><dd>Previous / next in viewer</dd><dt>u</dt><dd>Upload photos</dd><dt>/</dt><dd>Search filenames</dd><dt>f</dt><dd>Toggle favorites view</dd><dt>Space</dt><dd>Favorite the open photo</dd><dt>Esc</dt><dd>Close viewer or help</dd><dt>?</dt><dd>Show this help</dd></dl></dialog>
 <noscript>Enable JavaScript to use Lumio.</noscript>
 </body></html>

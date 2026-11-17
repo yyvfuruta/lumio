@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS lumio_photos (
   deleted_at timestamptz
 );
 ALTER TABLE lumio_photos ADD COLUMN IF NOT EXISTS preview_size bigint NOT NULL DEFAULT 0;
+ALTER TABLE lumio_photos ADD COLUMN IF NOT EXISTS duration double precision NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS lumio_photos_timeline ON lumio_photos (added_at DESC, id DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS lumio_photos_favorites ON lumio_photos (added_at DESC, id DESC) WHERE deleted_at IS NULL AND favorite;
 CREATE TABLE IF NOT EXISTS lumio_sessions (

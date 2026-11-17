@@ -1,31 +1,45 @@
 # Lumio
 
-A self-hosted photo library written in Go. Lumio uses PostgreSQL for metadata and supports local storage, persistent volumes, and cloud buckets.
+A self-hosted photo and video library written in Go. Lumio uses PostgreSQL for metadata and supports local storage, persistent volumes, and cloud buckets.
 
 ## Screenshots
 
-Gallery with date navigation:
+Light theme with upload-date navigation:
 
-![Photo gallery with a vertical upload timeline](docs/screenshots/gallery.png)
+![Light photo gallery with anime samples and date navigation](docs/screenshots/gallery.png)
+
+Dark theme with photo selection:
+
+![Dark photo gallery with white selection indicators](docs/screenshots/gallery-dark.png)
+
+Video playback:
+
+![Video player with native playback and seeking controls](docs/screenshots/video.png)
 
 Storage and library status:
 
 ![Library statistics and disk usage](docs/screenshots/status.png)
 
-[Demo image sources](docs/screenshots/SOURCES.md).
+[Demo image and video sources](docs/screenshots/SOURCES.md).
 
 ## Features
 
-- Photo uploads, thumbnails, favorites, filename search, and original downloads.
-- Multi-image selection with streaming ZIP downloads of up to 1000 originals.
+- Photo and video uploads, JPEG thumbnails, favorites, filename search, and original downloads.
+- MP4 and WebM playback with duration badges and seeking.
+- Selection by photo, video, day, or mouse drag, with streaming ZIP downloads of up to 1000 originals.
 - Upload timeline with year/month navigation and date filtering.
+- Simple interface with light, dark, and system themes.
 - SHA-256 deduplication and unchanged original files.
 - Password authentication with sessions shared across replicas.
 - Local files, S3-compatible buckets, Google Cloud Storage, and Azure Blob Storage.
 - Disk usage, library statistics, and storage availability in the status panel.
 - JSON logs, health endpoints, and Kubernetes manifests.
 
-Uploads support JPEG, PNG, GIF, and HEIC images up to 40 megapixels. HEIC originals are preserved, with JPEG thumbnails and previews for browser display. The timeline uses upload dates. The application ships as a single binary with an embedded web interface.
+Images support JPEG, PNG, GIF, and HEIC up to 40 megapixels. HEIC originals are preserved, with JPEG thumbnails and previews for browser display. Videos support MP4 with H.264 video and optional AAC audio, or WebM with VP8/VP9/AV1 video and optional Opus/Vorbis audio. Playback depends on browser codec support; originals are preserved without transcoding.
+
+The default per-file upload limit is 32 MiB for both photos and videos, configurable up to 256 MiB. The timeline uses upload dates.
+
+Lumio ships as a single binary with an embedded web interface. Video processing requires `ffmpeg` and `ffprobe` on the server PATH; container images include both.
 
 ## Quick start
 

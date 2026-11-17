@@ -1,13 +1,13 @@
-# Demo image sources
+# Demo media sources
 
-Screenshots use sample images from the following sources:
+The gallery screenshots use movie stills published by Studio Ghibli:
 
-- https://sanriotimes.sanrio.co.jp/n/nd15db231e3f9
-- https://us.oricon-group.com/news/9324/
-- https://www.ebay.com/itm/188991776699
-- https://www.ebay.com/itm/206511002503
-- https://www.ghibli.jp/works/
-- https://www.imdb.com/title/tt0409591/
-- https://www.janm.org/exhibits/hellokitty
-- https://youpouch.com/2024/06/30/1198339/
-- https://www.zerochan.net/4250504
+- [Spirited Away](https://www.ghibli.jp/works/chihiro/) — © 2001 Hayao Miyazaki/Studio Ghibli, NDDTM.
+- [Howl’s Moving Castle](https://www.ghibli.jp/works/howl/) — © 2004 Diana Wynne Jones/Hayao Miyazaki/Studio Ghibli, NDDMT.
+- [My Neighbor Totoro](https://www.ghibli.jp/works/totoro/) — © 1988 Hayao Miyazaki/Studio Ghibli.
+
+Studio Ghibli provides these stills on its official film pages. See the [announcement](https://www.ghibli.jp/info/013344/).
+
+The video screenshot uses the [flower video](https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4) from MDN’s media examples.
+
+Screenshots show the running local application with sample upload dates. They include the light gallery, dark selection, video viewer, and storage status.

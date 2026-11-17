@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -140,7 +139,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	part, err := reader.NextPart()
 	if err != nil || part.FormName() != "photo" || part.FileName() == "" {
-		problem(w, 400, "select a photo")
+		problem(w, 400, "select a photo or video")
 		return
 	}
 	defer part.Close()
@@ -149,6 +148,10 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		var maxErr *http.MaxBytesError
 		if errors.Is(err, errTooLarge) || errors.As(err, &maxErr) {
 			problem(w, 413, "file exceeds the upload limit")
+			return
+		}
+		if errors.Is(err, errVideoTools) {
+			problem(w, 503, "video uploads require FFmpeg and FFprobe on the server")
 			return
 		}
 		if errors.Is(err, errImage) {
@@ -276,15 +279,13 @@ func (a *App) media(w http.ResponseWriter, r *http.Request) {
 		internal(w, err)
 		return
 	}
-	defer reader.Close()
+	content := &blobReadSeeker{ctx: r.Context(), bucket: a.bucket, key: id + "/" + key, size: size, reader: reader}
+	defer content.Close()
 	w.Header().Set("Content-Type", typ)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": p.Name}))
 	}
-	if _, err := io.Copy(w, reader); err != nil {
-		slog.Error("photo stream interrupted", "error", err)
-	}
+	http.ServeContent(w, r, p.Name, p.AddedAt, content)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

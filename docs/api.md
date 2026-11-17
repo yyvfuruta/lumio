@@ -10,19 +10,19 @@ Base path: `/api/v1`. Resources and HTTP methods follow the conventions in [REST
 | POST | `/photo-archives` | Create a selection download using `{"photoIds":["..."]}`; returns `201`, a download URL, and a 15-minute expiry |
 | GET | `/photo-archives/{id}` | Stream selected originals as a ZIP; requires authentication and an unexpired download |
 | GET | `/status` | Authenticated library counts, byte sizes, disk capacity where available, and database/storage availability |
-| GET | `/photos` | List photos, newest upload first; returns `photos` and `nextCursor` |
+| GET | `/photos` | List photos and videos, newest upload first; returns `photos` and `nextCursor` |
 | POST | `/photos` | Multipart upload, one file in the `photo` field; returns `201` and `Location` for a new photo, or `200` for identical existing bytes |
 | GET | `/photos/timeline` | Upload months and counts; accepts `q`, `favorite`, and IANA `tz` (default UTC) |
 | GET | `/photos/{id}` | Photo metadata |
 | PATCH | `/photos/{id}` | Update `{"favorite":true}` or `{"favorite":false}`; returns updated metadata |
 | DELETE | `/photos/{id}` | Hide photo and queue object removal; returns `204` |
 | GET | `/photos/{id}/original` | Authenticated original bytes; `?download=1` adds attachment disposition |
-| GET | `/photos/{id}/preview` | Browser display image: JPEG for HEIC, original bytes for other formats |
+| GET | `/photos/{id}/preview` | Browser display media: JPEG for HEIC, original bytes for other formats |
 | GET | `/photos/{id}/thumbnail` | Authenticated JPEG thumbnail |
 
 All photo routes require a valid session. State-changing requests require `X-Lumio-Request: 1`. JSON requests require `Content-Type: application/json`. Browser Origin/Fetch Metadata is checked, and cross-origin requests are not enabled.
 
-Photo IDs are lowercase SHA-256 hashes of original bytes. Upload responses are `{"photo":{...},"duplicate":false}`. Metadata contains `id`, `name`, `type`, `size`, `width`, `height`, `addedAt`, and `favorite`. Dates use RFC 3339 in UTC.
+Photo IDs are lowercase SHA-256 hashes of original bytes. Upload responses are `{"photo":{...},"duplicate":false}`. Metadata contains `id`, `name`, `type`, `size`, `width`, `height`, `addedAt`, and `favorite`, plus `duration` in seconds for videos. Dates use RFC 3339 in UTC.
 
 Collection parameters:
 
@@ -38,3 +38,5 @@ Errors return JSON such as `{"error":"photo not found"}` with `400` for malforme
 POST is used to create resources, GET to retrieve them, PATCH for partial metadata updates, and DELETE to remove them. Uploads and deletes are serialized for the same content ID across replicas; duplicate uploads reuse the existing resource.
 
 Photo archives accept up to 1000 selected IDs, ignore duplicates, preserve original bytes, and disambiguate repeated filenames. The browser streams the ZIP directly from the returned URL. A missing/deleted selection returns `404` on creation or `409` before download; expired download URLs return `404`. Storage errors during streaming terminate the download instead of returning an apparently complete, partial ZIP.
+
+Video uploads use the same `photo` multipart field and routes. Supported formats are MP4 with H.264 video and optional AAC audio, and WebM with VP8/VP9/AV1 video and optional Opus/Vorbis audio. Files are validated using FFprobe; FFmpeg generates the JPEG thumbnail. Unsupported or invalid videos return `415`; missing server video tools return `503`. Originals and previews support HTTP byte ranges (`206`, or `416` for an unsatisfiable range), including `HEAD`, for browser playback and seeking. Originals are preserved without transcoding.
