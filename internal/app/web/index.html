@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f7f4"><meta name="description" content="Lumio — um lugar só seu para guardar suas fotos.">
+  <title>Lumio · Suas memórias</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <section id="login-screen" class="login-screen" hidden>
+    <div class="login-card">
+      <span class="brand-mark" aria-hidden="true">✳</span><span class="eyebrow">SEU ARQUIVO PESSOAL</span>
+      <h1>Bem-vindo ao<br><span>Lumio.</span></h1><p>Suas fotos. Suas histórias.<br>Um lugar só seu.</p>
+      <form id="login-form"><label for="password">Sua senha</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button id="login-button" class="primary" type="submit">Entrar na minha galeria <span aria-hidden="true">↗</span></button><p id="login-error" class="error" role="alert"></p></form>
+      <span class="login-foot">Feito para guardar o que importa.</span>
+    </div><div class="login-art" aria-hidden="true"><div class="art-sun"></div><div class="art-hill back"></div><div class="art-hill front"></div><span>Pequenos instantes.<br>Boas lembranças.</span></div>
+  </section>
+  <div id="app" class="shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✳</span> lumio<span class="brand-dot">.</span></a>
+      <p class="nav-label">SUA BIBLIOTECA</p>
+      <nav aria-label="Biblioteca"><button class="nav-item active" id="nav-all" aria-current="page"><span aria-hidden="true">▦</span> Todas as fotos</button><button class="nav-item" id="nav-favorites"><span aria-hidden="true">♡</span> Favoritas</button></nav>
+      <div class="sidebar-bottom"><div class="personal"><span class="avatar">eu</span><div>Meu espaço<small>Arquivo pessoal</small></div></div><button id="logout" class="quiet">Sair da conta <span aria-hidden="true">↗</span></button></div>
+    </aside>
+    <main>
+      <header class="topbar"><span class="breadcrumb">Biblioteca <span>/</span> <strong id="crumb">Todas as fotos</strong></span><span class="private-badge"><i></i> Só seu</span></header>
+      <section class="gallery-heading"><div><p class="eyebrow">MEMÓRIAS, BEM GUARDADAS</p><h1 id="page-title">Todas as fotos<span>.</span></h1><p id="subtitle">Um espaço para os seus melhores instantes.</p></div><button class="primary" id="upload-button"><span aria-hidden="true">＋</span> Adicionar fotos</button><input id="file-input" type="file" accept="image/jpeg,image/png,image/gif" multiple hidden></section>
+      <section class="toolbar" aria-label="Ferramentas da galeria"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Buscar pelo nome da foto…" aria-label="Buscar pelo nome da foto" maxlength="200"></label><span class="sort-label">Mais recentes primeiro <span aria-hidden="true">↓</span></span></section>
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+      <section id="gallery" aria-label="Fotos"></section>
+      <section id="empty" class="empty" hidden><div class="empty-picture" aria-hidden="true"><span>☀</span><div></div></div><h2 id="empty-title">Toda história começa com uma foto.</h2><p id="empty-text">Adicione suas primeiras lembranças.<br>Elas vão se sentir em casa por aqui.</p><button id="empty-upload" class="text-button">Escolher minhas fotos <span aria-hidden="true">↗</span></button></section>
+      <div class="load-more"><button id="load-more" class="secondary" hidden>Carregar mais fotos</button></div>
+      <footer><span>lumio</span> Um lugar para voltar aos bons momentos.</footer>
+    </main>
+  </div>
+  <dialog id="viewer" aria-labelledby="viewer-title"><div class="viewer-bar"><div><h2 id="viewer-title"></h2><p id="viewer-meta"></p></div><button id="viewer-close" class="icon-button" aria-label="Fechar foto">✕</button></div><div class="viewer-image"><button id="viewer-prev" class="icon-button" aria-label="Foto anterior">‹</button><img id="viewer-image" alt=""><button id="viewer-next" class="icon-button" aria-label="Próxima foto">›</button></div><div class="viewer-actions"><button id="viewer-favorite" class="secondary">♡ Favoritar</button><a id="download" class="secondary" download>↓ Baixar original</a><button id="delete" class="danger">Excluir foto</button></div><p id="viewer-error" class="error" role="alert"></p></dialog>
+  <noscript>Ative o JavaScript para usar a galeria.</noscript>
+</body>
+</html>

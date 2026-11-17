@@ -1,0 +1,345 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"gocloud.dev/blob"
+	"gocloud.dev/blob/fileblob"
+	"gocloud.dev/blob/memblob"
+	"gocloud.dev/gcerrors"
+)
+
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 100, 70))
+	for y := 0; y < 70; y++ {
+		for x := 0; x < 100; x++ {
+			img.Set(x, y, color.RGBA{uint8(x * 2), uint8(y * 3), 90, 255})
+		}
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestConfig(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/lumio")
+	t.Setenv("LUMIO_PASSWORD", "a-long-test-password")
+	t.Setenv("LUMIO_STORAGE_URL", "")
+	c, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(c.StorageURL, "file:///") || !c.SecureCookie || c.MaxUploadBytes != 32<<20 {
+		t.Fatalf("unexpected defaults: %+v", c)
+	}
+	for _, raw := range []string{"http://bucket", "mem://", "s3://test?key=everything"} {
+		t.Setenv("LUMIO_STORAGE_URL", raw)
+		if _, err := ConfigFromEnv(); err == nil {
+			t.Fatalf("accepted %s", raw)
+		}
+	}
+	t.Setenv("LUMIO_STORAGE_URL", "gs://photos")
+	t.Setenv("LUMIO_MAX_UPLOAD_MB", "9999999999")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("accepted huge limit")
+	}
+}
+
+func TestCSRF(t *testing.T) {
+	for _, tc := range []struct {
+		header, origin, site string
+		want                 bool
+	}{
+		{"", "", "", false}, {"1", "", "", true}, {"1", "https://photos.test", "same-origin", true}, {"1", "https://evil.test", "", false}, {"1", "null", "", false}, {"1", "https://photos.test", "cross-site", false},
+	} {
+		r := httptest.NewRequest("POST", "https://photos.test/api/photos", nil)
+		r.Header.Set("X-Lumio-Request", tc.header)
+		r.Header.Set("Origin", tc.origin)
+		r.Header.Set("Sec-Fetch-Site", tc.site)
+		if safeMutation(r) != tc.want {
+			t.Fatalf("case %+v", tc)
+		}
+	}
+}
+
+func TestThumbnail(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(4, 5, 2004, 1005))
+	thumb := thumbnail(src)
+	if thumb.Bounds().Dx() != 640 || thumb.Bounds().Dy() != 320 {
+		t.Fatal(thumb.Bounds())
+	}
+	r, g, b, _ := thumb.At(0, 0).RGBA()
+	if r != 65535 || g != 65535 || b != 65535 {
+		t.Fatal("transparent pixels should be white")
+	}
+}
+
+// The same storage contract runs against memory, files, and optionally a live bucket.
+func TestBucketContract(t *testing.T) {
+	file, err := fileblob.OpenBucket(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]*blob.Bucket{"memory": memblob.OpenBucket(nil), "file": file}
+	if raw := os.Getenv("LUMIO_TEST_STORAGE_URL"); raw != "" {
+		b, err := openBucket(context.Background(), raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buckets["remote"] = b
+	}
+	for name, b := range buckets {
+		t.Run(name, func(t *testing.T) {
+			defer b.Close()
+			ctx := context.Background()
+			key := fmt.Sprintf("contract/%d", time.Now().UnixNano())
+			want := []byte("lumio storage contract")
+			if err := b.Upload(ctx, key, bytes.NewReader(want), &blob.WriterOptions{ContentType: "text/plain"}); err != nil {
+				t.Fatal(err)
+			}
+			defer b.Delete(ctx, key)
+			got, err := b.ReadAll(ctx, key)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("read: %q %v", got, err)
+			}
+			if err := b.Delete(ctx, key); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.ReadAll(ctx, key); gcerrors.Code(err) != gcerrors.NotFound {
+				t.Fatalf("expected not found: %v", err)
+			}
+		})
+	}
+}
+
+func TestIntegration(t *testing.T) {
+	databaseURL := os.Getenv("LUMIO_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("set LUMIO_TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	backends := map[string]string{"file": (&url.URL{Scheme: "file", Path: t.TempDir()}).String()}
+	if raw := os.Getenv("LUMIO_TEST_STORAGE_URL"); raw != "" {
+		backends["remote"] = raw
+	}
+	for backend, storageURL := range backends {
+		t.Run(backend, func(t *testing.T) { testIntegration(t, databaseURL, storageURL) })
+	}
+}
+
+func testIntegration(t *testing.T, databaseURL, storageURL string) {
+	t.Helper()
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schemaName := "lumio_test_" + hex.EncodeToString(random[:])
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schemaName); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(ctx, "DROP SCHEMA "+schemaName+" CASCADE")
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	q.Set("search_path", schemaName)
+	u.RawQuery = q.Encode()
+	// Isolate cloud objects, too. Never touch unrelated objects in the test bucket.
+	su, err := url.Parse(storageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sq := su.Query()
+	sq.Set("prefix", sq.Get("prefix")+schemaName+"/")
+	su.RawQuery = sq.Encode()
+	cfg := Config{Addr: ":0", DatabaseURL: u.String(), StorageURL: su.String(), Password: "integration-test-password", MaxUploadBytes: 1 << 20}
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	h1, h2 := a.Handler(), b.Handler()
+	request := func(handler http.Handler, method, path string, body io.Reader, cookie *http.Cookie, contentType string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://photos.test"+path, body)
+		r.Header.Set("X-Lumio-Request", "1")
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	assertCode := func(w *httptest.ResponseRecorder, want int) {
+		t.Helper()
+		if w.Code != want {
+			t.Fatalf("got %d want %d: %s", w.Code, want, w.Body.String())
+		}
+	}
+	assertCode(request(h1, "GET", "/api/photos", nil, nil, ""), 401)
+	assertCode(request(h1, "POST", "/api/login", strings.NewReader(`{"password":"wrong"}`), nil, "application/json"), 401)
+	login := request(h1, "POST", "/api/login", strings.NewReader(`{"password":"integration-test-password"}`), nil, "application/json")
+	assertCode(login, 200)
+	cookie := login.Result().Cookies()[0]
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatal("unsafe cookie")
+	}
+	assertCode(request(h2, "GET", "/api/photos", nil, cookie, ""), 200)
+	csrf := httptest.NewRequest("POST", "http://photos.test/api/photos", nil)
+	csrf.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	h1.ServeHTTP(w, csrf)
+	assertCode(w, 403)
+	pngData := testPNG(t)
+	upload := func(handler http.Handler, data []byte) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("photo", "memória.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		part.Write(data)
+		writer.Close()
+		return request(handler, "POST", "/api/photos", &body, cookie, writer.FormDataContentType())
+	}
+	assertCode(upload(h1, []byte("not an image")), 415)
+	assertCode(upload(h1, make([]byte, (1<<20)+1)), 413)
+	w = upload(h1, pngData)
+	assertCode(w, 201)
+	var uploaded struct {
+		Photo     Photo `json:"photo"`
+		Duplicate bool  `json:"duplicate"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	p := uploaded.Photo
+	if p.Name != "memória.png" || p.Width != 100 || p.Height != 70 {
+		t.Fatalf("unexpected metadata: %+v", p)
+	}
+	// Multiple replicas must deduplicate the same bytes and share the session.
+	var wg sync.WaitGroup
+	codes := make(chan int, 2)
+	for _, handler := range []http.Handler{h1, h2} {
+		wg.Add(1)
+		go func() { defer wg.Done(); codes <- upload(handler, pngData).Code }()
+	}
+	wg.Wait()
+	close(codes)
+	for code := range codes {
+		if code != 200 {
+			t.Fatalf("concurrent dedup: %d", code)
+		}
+	}
+	w = request(h2, "GET", "/media/"+p.ID+"/original", nil, cookie, "")
+	assertCode(w, 200)
+	if !bytes.Equal(w.Body.Bytes(), pngData) {
+		t.Fatal("original changed")
+	}
+	assertCode(request(h2, "GET", "/media/"+p.ID+"/thumb.jpg", nil, nil, ""), 401)
+	w = request(h2, "GET", "/media/"+p.ID+"/thumb.jpg", nil, cookie, "")
+	assertCode(w, 200)
+	if _, _, err := image.Decode(w.Body); err != nil {
+		t.Fatal(err)
+	}
+	assertCode(request(h2, "PATCH", "/api/photos/"+p.ID, strings.NewReader(`{"favorite":true}`), cookie, "application/json"), 200)
+	w = request(h1, "GET", "/api/photos?favorite=true&q=mem", nil, cookie, "")
+	assertCode(w, 200)
+	if !strings.Contains(w.Body.String(), p.ID) {
+		t.Fatal("favorite/search missing")
+	}
+	// Seed metadata to exercise keyset pagination at equal timestamps.
+	for i := 0; i < 65; i++ {
+		id := sha256.Sum256([]byte(fmt.Sprint(i)))
+		_, err := a.db.Exec(ctx, "INSERT INTO lumio_photos(id,name,content_type,size,thumb_size,width,height,added_at) VALUES($1,'page','image/png',1,1,1,1,'2020-01-01')", hex.EncodeToString(id[:]))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var page struct {
+		Photos []Photo `json:"photos"`
+		Next   string  `json:"nextCursor"`
+	}
+	w = request(h1, "GET", "/api/photos", nil, cookie, "")
+	assertCode(w, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Photos) != 60 || page.Next == "" {
+		t.Fatal("bad first page")
+	}
+	seen := map[string]bool{}
+	for _, photo := range page.Photos {
+		seen[photo.ID] = true
+	}
+	w = request(h2, "GET", "/api/photos?cursor="+page.Next, nil, cookie, "")
+	assertCode(w, 200)
+	json.Unmarshal(w.Body.Bytes(), &page)
+	if len(page.Photos) != 6 || page.Next != "" {
+		t.Fatal("bad second page")
+	}
+	for _, photo := range page.Photos {
+		if seen[photo.ID] {
+			t.Fatal("pagination duplicated photo")
+		}
+	}
+	assertCode(request(h1, "DELETE", "/api/photos/"+p.ID, nil, cookie, ""), 204)
+	assertCode(request(h2, "GET", "/media/"+p.ID+"/original", nil, cookie, ""), 404)
+	if _, err := a.collectOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := a.bucket.Exists(ctx, p.ID+"/original"); err != nil || exists {
+		t.Fatalf("object not collected: %v", err)
+	}
+	assertCode(upload(h2, pngData), 201)
+	// Restarting retains data. Logging out invalidates the session on every replica.
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCode(request(c.Handler(), "GET", "/media/"+p.ID+"/original", nil, cookie, ""), 200)
+	c.Close()
+	assertCode(request(h1, "POST", "/api/logout", nil, cookie, ""), 204)
+	assertCode(request(h2, "GET", "/api/photos", nil, cookie, ""), 401)
+	for _, key := range []string{p.ID + "/original", p.ID + "/thumb.jpg"} {
+		if err := a.bucket.Delete(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
