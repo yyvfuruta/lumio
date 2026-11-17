@@ -18,30 +18,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gen2brain/h265/heic"
 	"github.com/jackc/pgx/v5"
 	"gocloud.dev/blob"
 	"gocloud.dev/gcerrors"
 )
 
-var errImage = errors.New("use a valid JPEG, PNG, or GIF image up to 40 megapixels")
+var errImage = errors.New("use a valid JPEG, PNG, GIF, or HEIC image up to 40 megapixels")
 var errTooLarge = errors.New("file exceeds the upload limit")
 
+const maxImagePixels = 40_000_000
+
 type Photo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Size      int64     `json:"size"`
-	ThumbSize int64     `json:"-"`
-	Width     int       `json:"width"`
-	Height    int       `json:"height"`
-	AddedAt   time.Time `json:"addedAt"`
-	Favorite  bool      `json:"favorite"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Size        int64     `json:"size"`
+	ThumbSize   int64     `json:"-"`
+	PreviewSize int64     `json:"-"`
+	Width       int       `json:"width"`
+	Height      int       `json:"height"`
+	AddedAt     time.Time `json:"addedAt"`
+	Favorite    bool      `json:"favorite"`
 }
 
-const columns = "id,name,content_type,size,thumb_size,width,height,added_at,favorite"
+const columns = "id,name,content_type,size,thumb_size,preview_size,width,height,added_at,favorite"
 
 func scanPhoto(row pgx.Row) (p Photo, err error) {
-	err = row.Scan(&p.ID, &p.Name, &p.Type, &p.Size, &p.ThumbSize, &p.Width, &p.Height, &p.AddedAt, &p.Favorite)
+	err = row.Scan(&p.ID, &p.Name, &p.Type, &p.Size, &p.ThumbSize, &p.PreviewSize, &p.Width, &p.Height, &p.AddedAt, &p.Favorite)
 	return
 }
 
@@ -78,25 +82,41 @@ func (a *App) addPhoto(ctx context.Context, name string, src io.Reader) (Photo, 
 		return Photo{}, false, err
 	}
 	cfg, format, err := image.DecodeConfig(f)
-	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 40_000_000 {
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
 		return Photo{}, false, errImage
 	}
-	mime := map[string]string{"jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif"}[format]
+	mime := map[string]string{"jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "heic": "image/heic"}[format]
 	if mime == "" {
 		return Photo{}, false, errImage
 	}
 	if _, err := f.Seek(0, 0); err != nil {
 		return Photo{}, false, err
 	}
-	img, _, err := image.Decode(f)
+	var img image.Image
+	if format == "heic" {
+		img, err = heic.Decode(f, heic.Options{AutoRotate: true, FrameSizeLimit: maxImagePixels, Threads: 2})
+	} else {
+		img, _, err = image.Decode(f)
+	}
 	if err != nil {
 		return Photo{}, false, errImage
+	}
+	cfg.Width, cfg.Height = img.Bounds().Dx(), img.Bounds().Dy()
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxImagePixels/cfg.Height {
+		return Photo{}, false, errImage
+	}
+	var preview bytes.Buffer
+	if format == "heic" {
+		img = resizeImage(img, 2048)
+		if err := jpeg.Encode(&preview, img, &jpeg.Options{Quality: 90}); err != nil {
+			return Photo{}, false, err
+		}
 	}
 	var thumb bytes.Buffer
 	if err := jpeg.Encode(&thumb, thumbnail(img), &jpeg.Options{Quality: 82}); err != nil {
 		return Photo{}, false, err
 	}
-	p := Photo{ID: hex.EncodeToString(hash.Sum(nil)), Name: filepath.Base(strings.ReplaceAll(name, "\\", "/")), Type: mime, Size: n, ThumbSize: int64(thumb.Len()), Width: cfg.Width, Height: cfg.Height}
+	p := Photo{ID: hex.EncodeToString(hash.Sum(nil)), Name: filepath.Base(strings.ReplaceAll(name, "\\", "/")), Type: mime, Size: n, ThumbSize: int64(thumb.Len()), PreviewSize: int64(preview.Len()), Width: cfg.Width, Height: cfg.Height}
 	if len(p.Name) > 255 {
 		p.Name = "photo"
 	}
@@ -128,8 +148,13 @@ func (a *App) addPhoto(ctx context.Context, name string, src io.Reader) (Photo, 
 	if err := a.bucket.Upload(ctx, p.ID+"/thumb.jpg", &thumb, &blob.WriterOptions{ContentType: "image/jpeg"}); err != nil {
 		return Photo{}, false, err
 	}
-	p, err = scanPhoto(tx.QueryRow(ctx, `INSERT INTO lumio_photos (id,name,content_type,size,thumb_size,width,height)
-	 VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET name=excluded.name,content_type=excluded.content_type,size=excluded.size,thumb_size=excluded.thumb_size,width=excluded.width,height=excluded.height,added_at=now(),favorite=false,deleted_at=NULL RETURNING `+columns, p.ID, p.Name, p.Type, p.Size, p.ThumbSize, p.Width, p.Height))
+	if p.PreviewSize > 0 {
+		if err := a.bucket.Upload(ctx, p.ID+"/preview.jpg", &preview, &blob.WriterOptions{ContentType: "image/jpeg"}); err != nil {
+			return Photo{}, false, err
+		}
+	}
+	p, err = scanPhoto(tx.QueryRow(ctx, `INSERT INTO lumio_photos (id,name,content_type,size,thumb_size,preview_size,width,height)
+	 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET name=excluded.name,content_type=excluded.content_type,size=excluded.size,thumb_size=excluded.thumb_size,preview_size=excluded.preview_size,width=excluded.width,height=excluded.height,added_at=now(),favorite=false,deleted_at=NULL RETURNING `+columns, p.ID, p.Name, p.Type, p.Size, p.ThumbSize, p.PreviewSize, p.Width, p.Height))
 	if err != nil {
 		return Photo{}, false, err
 	}
@@ -168,7 +193,7 @@ func (a *App) collectOne(ctx context.Context) (bool, error) {
 	if !deleted {
 		return true, nil
 	}
-	for _, key := range []string{id + "/original", id + "/thumb.jpg"} {
+	for _, key := range []string{id + "/original", id + "/thumb.jpg", id + "/preview.jpg"} {
 		if err := a.bucket.Delete(ctx, key); err != nil && gcerrors.Code(err) != gcerrors.NotFound {
 			return false, err
 		}
@@ -180,14 +205,18 @@ func (a *App) collectOne(ctx context.Context) (bool, error) {
 }
 
 func thumbnail(src image.Image) image.Image {
+	return resizeImage(src, 640)
+}
+
+func resizeImage(src image.Image, limit int) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	tw, th := w, h
-	if w > 640 || h > 640 {
+	if w > limit || h > limit {
 		if w >= h {
-			tw, th = 640, max(1, h*640/w)
+			tw, th = limit, max(1, h*limit/w)
 		} else {
-			th, tw = 640, max(1, w*640/h)
+			th, tw = limit, max(1, w*limit/h)
 		}
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, tw, th))

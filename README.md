@@ -17,6 +17,7 @@ Storage and library status:
 ## Features
 
 - Photo uploads, thumbnails, favorites, filename search, and original downloads.
+- Multi-image selection with streaming ZIP downloads of up to 1000 originals.
 - Upload timeline with year/month navigation and date filtering.
 - SHA-256 deduplication and unchanged original files.
 - Password authentication with sessions shared across replicas.
@@ -24,7 +25,7 @@ Storage and library status:
 - Disk usage, library statistics, and storage availability in the status panel.
 - JSON logs, health endpoints, and Kubernetes manifests.
 
-Uploads support JPEG, PNG, and GIF images up to 40 megapixels. The timeline uses upload dates. The application ships as a single binary with an embedded web interface.
+Uploads support JPEG, PNG, GIF, and HEIC images up to 40 megapixels. HEIC originals are preserved, with JPEG thumbnails and previews for browser display. The timeline uses upload dates. The application ships as a single binary with an embedded web interface.
 
 ## Quick start
 

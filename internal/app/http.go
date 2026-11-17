@@ -42,6 +42,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/photos", a.protect(a.listPhotos))
 	mux.HandleFunc("GET /api/v1/photos/timeline", a.protect(a.timeline))
 	mux.HandleFunc("GET /api/v1/status", a.protect(a.status))
+	mux.HandleFunc("POST /api/v1/photo-archives", a.protect(a.createArchive))
+	mux.HandleFunc("GET /api/v1/photo-archives/{id}", a.protect(a.downloadArchive))
 	mux.HandleFunc("POST /api/v1/photos", a.protect(a.upload))
 	mux.HandleFunc("GET /api/v1/photos/{id}", a.protect(a.getPhoto))
 	mux.HandleFunc("PATCH /api/v1/photos/{id}", a.protect(a.favorite))
@@ -249,7 +251,7 @@ func (a *App) deletePhoto(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) media(w http.ResponseWriter, r *http.Request) {
 	id, kind := r.PathValue("id"), r.PathValue("kind")
-	if !validID(id) || (kind != "original" && kind != "thumbnail") {
+	if !validID(id) || (kind != "original" && kind != "thumbnail" && kind != "preview") {
 		problem(w, 404, "photo not found")
 		return
 	}
@@ -262,16 +264,19 @@ func (a *App) media(w http.ResponseWriter, r *http.Request) {
 		internal(w, err)
 		return
 	}
-	reader, err := a.bucket.NewReader(r.Context(), id+"/"+map[string]string{"original": "original", "thumbnail": "thumb.jpg"}[kind], nil)
+	key, typ, size := "original", p.Type, p.Size
+	if kind == "thumbnail" {
+		key, typ, size = "thumb.jpg", "image/jpeg", p.ThumbSize
+	}
+	if kind == "preview" && p.PreviewSize > 0 {
+		key, typ, size = "preview.jpg", "image/jpeg", p.PreviewSize
+	}
+	reader, err := a.bucket.NewReader(r.Context(), id+"/"+key, nil)
 	if err != nil {
 		internal(w, err)
 		return
 	}
 	defer reader.Close()
-	typ, size := p.Type, p.Size
-	if kind == "thumbnail" {
-		typ, size = "image/jpeg", p.ThumbSize
-	}
 	w.Header().Set("Content-Type", typ)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	if r.URL.Query().Get("download") == "1" {
@@ -283,12 +288,16 @@ func (a *App) media(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONLimit(w, r, dst, 8192)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
 	typ, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || typ != "application/json" {
 		problem(w, 415, "use Content-Type: application/json")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(dst); err != nil {

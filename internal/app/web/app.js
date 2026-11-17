@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0 };
+const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false };
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const sizeFormat = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
 
@@ -14,7 +14,7 @@ async function api(path, options = {}) {
 }
 
 function status(message, error = false) { $('status').textContent = message; $('status').hidden = !message; $('status').classList.toggle('error', error); }
-function showLogin() { state.request++; state.photos = []; $('gallery').replaceChildren(); $('viewer').close(); $('viewer-image').removeAttribute('src'); $('app').hidden = true; $('login-screen').hidden = false; $('password').focus(); }
+function showLogin() { state.request++; state.selection.clear(); state.selecting = false; state.photos = []; $('gallery').replaceChildren(); $('viewer').close(); $('viewer-image').removeAttribute('src'); $('app').hidden = true; $('login-screen').hidden = false; $('password').focus(); }
 function showApp() { $('login-screen').hidden = true; $('app').hidden = false; $('password').value = ''; }
 
 $('login-form').addEventListener('submit', async event => {
@@ -28,7 +28,7 @@ $('logout').addEventListener('click', async () => {
 });
 
 function setView(favorite) {
-  state.view = 'photos'; $('photo-panel').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
+  state.view = 'photos'; $('selection-toggle').hidden = false; $('photo-panel').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
   state.favorite = favorite; $('nav-all').classList.toggle('active', !favorite); $('nav-favorites').classList.toggle('active', favorite);
   $('nav-all').setAttribute('aria-current', favorite ? 'false' : 'page'); $('nav-favorites').setAttribute('aria-current', favorite ? 'page' : 'false');
   const title = favorite ? 'favorites' : 'photos'; $('page-title').textContent = title;
@@ -66,11 +66,11 @@ function render() {
     const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = date;
     const grid = document.createElement('div'); grid.className = 'photo-grid'; section.append(heading, grid);
     for (const { photo, index } of items) {
-      const card = document.createElement('article'); card.className = 'photo';
+      const card = document.createElement('article'); card.className = 'photo'; card.dataset.photoId = photo.id;
       const open = document.createElement('button'); open.className = 'photo-open'; open.setAttribute('aria-label', `Open ${photo.name}`);
-      const img = document.createElement('img'); img.src = `/api/v1/photos/${photo.id}/thumbnail`; img.alt = photo.name; img.loading = 'lazy'; img.decoding = 'async'; open.append(img); open.addEventListener('click', () => showPhoto(index));
+      const img = document.createElement('img'); img.src = `/api/v1/photos/${photo.id}/thumbnail`; img.alt = photo.name; img.loading = 'lazy'; img.decoding = 'async'; open.append(img); open.addEventListener('click', () => { if (state.selecting) selectPhoto(photo.id, !state.selection.has(photo.id)); else showPhoto(index); });
       const favorite = document.createElement('button'); favorite.className = `photo-fav${photo.favorite ? ' saved' : ''}`; favorite.textContent = photo.favorite ? '★' : '☆'; favorite.setAttribute('aria-label', photo.favorite ? 'Remove from favorites' : 'Add to favorites'); favorite.setAttribute('aria-pressed', String(photo.favorite)); favorite.addEventListener('click', () => toggleFavorite(photo));
-      const name = document.createElement('span'); name.className = 'photo-name'; name.textContent = photo.name; card.append(open, favorite, name); grid.append(card);
+      const name = document.createElement('span'); name.className = 'photo-name'; name.textContent = photo.name; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'photo-checkbox'; checkbox.dataset.photoId = photo.id; checkbox.setAttribute('aria-label', `Select ${photo.name}`); checkbox.addEventListener('change', () => selectPhoto(photo.id, checkbox.checked)); card.append(open, checkbox, favorite, name); grid.append(card);
     }
     gallery.append(section);
   }
@@ -79,6 +79,7 @@ function render() {
   $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : state.period ? 'No photos in this period.' : 'No photos yet.';
   $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload a few photos to get started.';
   $('empty-upload').hidden = state.favorite || !!state.query;
+  renderSelection();
 }
 
 for (const id of ['upload-button', 'empty-upload']) $(id).addEventListener('click', () => $('file-input').click());
@@ -111,7 +112,7 @@ function showPhoto(index) {
   $('viewer-position').textContent = `${index + 1} / ${state.photos.length}`;
   state.selected = index; const photo = state.photos[index];
   $('viewer-title').textContent = photo.name; $('viewer-meta').textContent = `${photo.width} × ${photo.height} · ${sizeFormat(photo.size)} · Added ${dateFormat.format(new Date(photo.addedAt))}`;
-  $('viewer-image').src = `/api/v1/photos/${photo.id}/original`; $('viewer-image').alt = photo.name;
+  $('viewer-image').src = `/api/v1/photos/${photo.id}/preview`; $('viewer-image').alt = photo.name;
   $('viewer-favorite').textContent = photo.favorite ? '★ starred' : '☆ favorite'; $('viewer-favorite').setAttribute('aria-pressed', String(photo.favorite));
   $('download').href = `/api/v1/photos/${photo.id}/original?download=1`; $('viewer-menu').open = false; $('viewer').setAttribute('aria-label', photo.name);
   $('viewer-error').textContent = ''; if (!$('viewer').open) $('viewer').showModal(); $('viewer-image').focus({ preventScroll: true });
@@ -133,7 +134,7 @@ $('viewer-favorite').addEventListener('click', () => toggleFavorite(state.photos
 $('delete').addEventListener('click', async () => {
   const photo = state.photos[state.selected]; if (!photo || !confirm(`Permanently delete “${photo.name}”?`)) return;
   $('delete').disabled = true;
-  try { await api(`/api/v1/photos/${photo.id}`, { method: 'DELETE' }); $('viewer').close(); state.photos = state.photos.filter(p => p.id !== photo.id); render(); status('Photo deleted.'); }
+  try { await api(`/api/v1/photos/${photo.id}`, { method: 'DELETE' }); $('viewer').close(); state.photos = state.photos.filter(p => p.id !== photo.id); state.selection.delete(photo.id); render(); status('Photo deleted.'); loadTimeline(); }
   catch (error) { $('viewer-error').textContent = error.message; } finally { $('delete').disabled = false; }
 });
 
@@ -153,6 +154,7 @@ document.addEventListener('keydown', event => {
     if (event.key === ' ' && !event.target.closest('button, a, summary')) { event.preventDefault(); toggleFavorite(state.photos[state.selected]); }
     return;
   }
+  if (event.key === 'Escape' && state.selecting) { state.selection.clear(); state.selecting = false; renderSelection(); return; }
   if (event.key === '/') { event.preventDefault(); if (state.view === 'status') setView(state.favorite); $('search').focus(); return; }
   if (event.key === 'u') { event.preventDefault(); if (!state.uploading) $('file-input').click(); return; }
   if (event.key === 'f') { event.preventDefault(); setView(!state.favorite); return; }
@@ -181,8 +183,9 @@ async function refreshStatus() {
   $('refresh-status').disabled = true; $('status-error').textContent = '';
   try {
     const data = await api('/api/v1/status');
-    const values = { photos: data.photos, favorites: data.favorites, originals: byteSize(data.originalBytes), thumbnails: byteSize(data.thumbnailBytes), library: byteSize(data.originalBytes + data.thumbnailBytes), pending: data.pendingDeletions, database: data.database, storage: data.storage, access: data.storageAccessible ? 'available' : 'unavailable' };
+    const values = { photos: data.photos, favorites: data.favorites, originals: byteSize(data.originalBytes), thumbnails: byteSize(data.thumbnailBytes), library: byteSize(data.originalBytes + data.thumbnailBytes + (data.previewBytes || 0)), pending: data.pendingDeletions, database: data.database, storage: data.storage, access: data.storageAccessible ? 'available' : 'unavailable' };
     for (const [key, value] of Object.entries(values)) $(`usage-${key}`).textContent = value;
+    $('preview-usage-row').hidden = !data.previewBytes; $('usage-previews').textContent = byteSize(data.previewBytes || 0);
     document.querySelectorAll('.disk-row').forEach(row => { row.hidden = !data.disk; });
     if (data.disk) {
       $('usage-total').textContent = byteSize(data.disk.total);
@@ -195,7 +198,7 @@ async function refreshStatus() {
   finally { $('refresh-status').disabled = false; }
 }
 $('nav-status').addEventListener('click', () => {
-  state.view = 'status'; $('photo-panel').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
+  state.view = 'status'; $('selection-toggle').hidden = true; $('photo-panel').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
   for (const id of ['nav-all', 'nav-favorites']) { $(id).classList.remove('active'); $(id).removeAttribute('aria-current'); }
   $('nav-status').classList.add('active'); $('nav-status').setAttribute('aria-current', 'page');
   refreshStatus();
@@ -246,3 +249,41 @@ async function loadTimeline() {
     }
   } catch (error) { if (request === state.timelineRequest && !$('app').hidden) status(error.message, true); }
 }
+
+function renderSelection() {
+  $('photo-panel').classList.toggle('selecting', state.selecting);
+  $('selection-toggle').textContent = state.selecting ? 'cancel' : 'select';
+  $('selection-toggle').setAttribute('aria-pressed', String(state.selecting));
+  $('selection-bar').hidden = !state.selecting;
+  $('selection-count').textContent = `${state.selection.size} selected`;
+  $('download-selected').disabled = !state.selection.size || state.downloading;
+  document.querySelectorAll('.photo-checkbox').forEach(node => { node.checked = state.selection.has(node.dataset.photoId); });
+  document.querySelectorAll('.photo').forEach(node => { node.classList.toggle('selected', state.selection.has(node.dataset.photoId)); });
+}
+function selectPhoto(id, selected) {
+  if (selected && !state.selection.has(id) && state.selection.size >= 1000) { status('Select up to 1000 photos per download.', true); renderSelection(); return; }
+  state.selecting = true;
+  if (selected) state.selection.add(id); else state.selection.delete(id);
+  renderSelection();
+}
+$('selection-toggle').addEventListener('click', () => {
+  state.selecting = !state.selecting;
+  if (!state.selecting) state.selection.clear();
+  renderSelection();
+});
+$('clear-selection').addEventListener('click', () => { state.selection.clear(); renderSelection(); });
+$('select-shown').addEventListener('click', () => {
+  const ids = new Set([...state.selection, ...state.photos.map(photo => photo.id)]);
+  if (ids.size > 1000) { status('Select up to 1000 photos per download.', true); return; }
+  state.selection = ids; renderSelection();
+});
+$('download-selected').addEventListener('click', async () => {
+  const ids = [...state.selection]; if (!ids.length || state.downloading) return;
+  state.downloading = true; renderSelection();
+  try {
+    const archive = await api('/api/v1/photo-archives', { method: 'POST', body: JSON.stringify({ photoIds: ids }) });
+    const link = document.createElement('a'); link.href = archive.url; link.download = ''; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+  } catch (error) { status(error.message, true); }
+  finally { state.downloading = false; renderSelection(); }
+});

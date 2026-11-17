@@ -1,8 +1,9 @@
 module github.com/yyvfuruta/lumio
 
-go 1.26.0
+go 1.26.4
 
 require (
+	github.com/gen2brain/h265 v0.2.5
 	github.com/jackc/pgx/v5 v5.13.0
 	gocloud.dev v0.49.0
 )

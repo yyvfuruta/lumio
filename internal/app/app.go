@@ -105,6 +105,9 @@ func (a *App) maintenance(ctx context.Context) {
 		if err == nil {
 			_, err = a.db.Exec(cleanup, "DELETE FROM lumio_login_limits WHERE minute<now()-interval '5 minutes'")
 		}
+		if err == nil {
+			_, err = a.db.Exec(cleanup, "DELETE FROM lumio_photo_archives WHERE expires_at<now()")
+		}
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			slog.Error("session cleanup failed", "error", err)

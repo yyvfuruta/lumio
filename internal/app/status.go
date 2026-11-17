@@ -19,6 +19,7 @@ type libraryStatus struct {
 	Favorites         int64      `json:"favorites"`
 	OriginalBytes     int64      `json:"originalBytes"`
 	ThumbnailBytes    int64      `json:"thumbnailBytes"`
+	PreviewBytes      int64      `json:"previewBytes"`
 	PendingDeletions  int64      `json:"pendingDeletions"`
 	Storage           string     `json:"storage"`
 	StorageAccessible bool       `json:"storageAccessible"`
@@ -35,7 +36,8 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 	 count(*) FILTER(WHERE deleted_at IS NULL AND favorite),
 	 coalesce(sum(size) FILTER(WHERE deleted_at IS NULL),0)::bigint,
 	 coalesce(sum(thumb_size) FILTER(WHERE deleted_at IS NULL),0)::bigint,
-	 count(*) FILTER(WHERE deleted_at IS NOT NULL) FROM lumio_photos`).Scan(&result.Photos, &result.Favorites, &result.OriginalBytes, &result.ThumbnailBytes, &result.PendingDeletions)
+	 coalesce(sum(preview_size) FILTER(WHERE deleted_at IS NULL),0)::bigint,
+	 count(*) FILTER(WHERE deleted_at IS NOT NULL) FROM lumio_photos`).Scan(&result.Photos, &result.Favorites, &result.OriginalBytes, &result.ThumbnailBytes, &result.PreviewBytes, &result.PendingDeletions)
 	if err != nil {
 		internal(w, err)
 		return

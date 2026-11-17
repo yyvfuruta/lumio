@@ -41,7 +41,7 @@ The Azure driver also supports the Azure default credential chain and SAS creden
 
 1. Back up PostgreSQL and your photo volume. Stop all Lumio replicas for the maintenance window.
 2. Run the same binary/image with the existing `DATABASE_URL`, access to the source volume at its existing path, the target provider credentials, and `LUMIO_MIGRATE_TO` set to the target URL.
-3. Run `lumio migrate-storage`. The source URL is read from PostgreSQL. Every original and thumbnail is copied and checked by size and SHA-256; originals are also checked against their content ID. Existing matching destination objects are reused, so interrupted migrations can be retried.
+3. Run `lumio migrate-storage`. The source URL is read from PostgreSQL. Every original, thumbnail, and HEIC preview is copied and checked by size and SHA-256; originals are also checked against their content ID. Existing matching destination objects are reused, so interrupted migrations can be retried.
 4. After success, set `LUMIO_STORAGE_URL` to the exact target URL and restart all replicas. On Kubernetes, switch to the bucket overlay and remove the application PVC mount after verification.
 
 ```sh
@@ -56,6 +56,6 @@ The same environment must be able to authenticate to both source and target. For
 
 ## Data and backups
 
-PostgreSQL contains photo metadata, favorites, hashed session tokens, login rate limits, and the registered storage URL. The storage backend contains `<sha256>/original` and `<sha256>/thumb.jpg`. Original bytes are not transcoded. Back up **both PostgreSQL and storage together**; the database is required to reconstruct the library.
+PostgreSQL contains photo metadata, favorites, hashed session tokens, login rate limits, and the registered storage URL. The storage backend contains `<sha256>/original`, `<sha256>/thumb.jpg`, and a `<sha256>/preview.jpg` for HEIC photos. Original bytes are not transcoded. Back up **both PostgreSQL and storage together**; the database is required to reconstruct the library.
 
 Deletion hides photos immediately. A background task removes objects and metadata within about 30 seconds, retrying failures. There is no user-facing trash/restore flow. A process crash during an uncommitted upload can leave unreferenced objects; automatic orphan scanning is not implemented. Source files retained after migration are backup copies, and later gallery deletion does not remove those copies.

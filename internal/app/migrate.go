@@ -46,6 +46,12 @@ func MigrateStorage(ctx context.Context, databaseURL, targetURL string) error {
 		return err
 	}
 	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(739421016)"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, schema); err != nil {
+		return err
+	}
 	var sourceURL string
 	if err := tx.QueryRow(ctx, "SELECT storage_url FROM lumio_settings WHERE id=true FOR UPDATE").Scan(&sourceURL); err != nil {
 		return err
@@ -80,6 +86,11 @@ func MigrateStorage(ctx context.Context, databaseURL, targetURL string) error {
 		}{{p.ID + "/original", p.Type, p.ID, p.Size}, {p.ID + "/thumb.jpg", "image/jpeg", "", p.ThumbSize}} {
 			if err := copyVerified(ctx, source, target, obj.key, obj.typ, obj.size, obj.expectedHash); err != nil {
 				return fmt.Errorf("object %s: %w", obj.key, err)
+			}
+		}
+		if p.PreviewSize > 0 {
+			if err := copyVerified(ctx, source, target, p.ID+"/preview.jpg", "image/jpeg", p.PreviewSize, ""); err != nil {
+				return fmt.Errorf("preview %s: %w", p.ID, err)
 			}
 		}
 		count++
