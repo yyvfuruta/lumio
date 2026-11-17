@@ -26,7 +26,8 @@ Storage and library status:
 
 - Photo and video uploads, JPEG thumbnails, favorites, filename search, and original downloads.
 - MP4 and WebM playback with duration badges and seeking.
-- Selection by photo, video, day, or mouse drag, with streaming ZIP downloads of up to 1000 originals.
+- Selection by photo, video, day, mouse drag, or Ctrl/⌘+A across the current search and date filters, up to 1000 files.
+- Download selected originals as a streaming ZIP, or delete the selection with confirmation.
 - Upload timeline with year/month navigation and date filtering.
 - Simple interface with light, dark, and system themes.
 - SHA-256 deduplication and unchanged original files.

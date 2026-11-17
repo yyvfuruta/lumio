@@ -1,8 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false };
+const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false, deleting: false, selectingAll: false };
 const dayPhotos = new Map();
 let selectingDay = false;
+const selectionBusy = () => state.deleting || state.selectingAll || selectingDay;
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const isVideo = photo => photo.type.startsWith('video/');
 const durationFormat = seconds => { const total = Math.max(0, Math.floor(seconds)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`; };
@@ -168,6 +169,11 @@ $('delete').addEventListener('click', async () => {
 $('help-button').addEventListener('click', () => $('help').showModal());
 $('help-close').addEventListener('click', () => $('help').close());
 document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a' &&
+      !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]') &&
+      !$('app').hidden && !$('help').open && !$('viewer').open && state.view === 'photos') {
+    event.preventDefault(); selectAllPhotos(); return;
+  }
   if (event.ctrlKey || event.metaKey || event.altKey || event.target.matches('input, textarea, select, [contenteditable]')) return;
   if ($('app').hidden || $('help').open) return;
   if ($('viewer').open) {
@@ -177,7 +183,7 @@ document.addEventListener('keydown', event => {
     if (event.key === ' ' && !event.target.closest('button, a, summary')) { event.preventDefault(); toggleFavorite(state.photos[state.selected]); }
     return;
   }
-  if (event.key === 'Escape' && state.selecting) { state.selection.clear(); state.selecting = false; renderSelection(); return; }
+  if (event.key === 'Escape' && state.selecting && !state.deleting) { state.selection.clear(); state.selecting = false; renderSelection(); return; }
   if (event.key === '/') { event.preventDefault(); if (state.view === 'status') setView(state.favorite); $('search').focus(); return; }
   if (event.key === 'u') { event.preventDefault(); if (!state.uploading) $('file-input').click(); return; }
   if (event.key === 'f') { event.preventDefault(); setView(!state.favorite); return; }
@@ -276,37 +282,39 @@ async function loadTimeline() {
 function renderSelection() {
   $('photo-panel').classList.toggle('selecting', state.selecting);
   $('selection-bar').hidden = !state.selecting;
-  $('selection-count').textContent = `${state.selection.size} selected`;
-  $('download-selected').disabled = !state.selection.size || state.downloading;
+  $('selection-count').textContent = state.selectingAll ? 'Selecting…' : `${state.selection.size} selected`;
+  $('download-selected').disabled = !state.selection.size || state.downloading || selectionBusy();
+  $('delete-selected').disabled = !state.selection.size || state.downloading || selectionBusy();
+  $('select-shown').disabled = selectionBusy();
+  $('clear-selection').disabled = selectionBusy();
+  $('cancel-selection').disabled = state.deleting;
   document.querySelectorAll('.day-checkbox').forEach(node => {
     const ids = dayPhotos.get(node.dataset.date) || state.photos.filter(photo => dateFormat.format(new Date(photo.addedAt)) === node.dataset.date).map(photo => photo.id);
     const selected = ids.filter(id => state.selection.has(id)).length;
     node.checked = ids.length > 0 && selected === ids.length && (dayPhotos.has(node.dataset.date) || !state.cursor);
     node.indeterminate = selected > 0 && !node.checked;
-    node.disabled = selectingDay;
+    node.disabled = selectionBusy();
   });
-  document.querySelectorAll('.photo-checkbox').forEach(node => { node.checked = state.selection.has(node.dataset.photoId); });
+  document.querySelectorAll('.photo-checkbox').forEach(node => { node.checked = state.selection.has(node.dataset.photoId); node.disabled = selectionBusy(); });
   document.querySelectorAll('.photo').forEach(node => { node.classList.toggle('selected', state.selection.has(node.dataset.photoId)); });
 }
 function selectPhoto(id, selected) {
+  if (selectionBusy()) { renderSelection(); return; }
   if (selected && !state.selection.has(id) && state.selection.size >= 1000) { status('Select up to 1000 photos per download.', true); renderSelection(); return; }
   state.selecting = true;
   if (selected) state.selection.add(id); else state.selection.delete(id);
   renderSelection();
 }
 $('cancel-selection').addEventListener('click', () => {
+  if (state.deleting) return;
   state.selecting = false;
   state.selection.clear();
   renderSelection();
 });
-$('clear-selection').addEventListener('click', () => { state.selection.clear(); renderSelection(); });
-$('select-shown').addEventListener('click', () => {
-  const ids = new Set([...state.selection, ...state.photos.map(photo => photo.id)]);
-  if (ids.size > 1000) { status('Select up to 1000 photos per download.', true); return; }
-  state.selection = ids; renderSelection();
-});
+$('clear-selection').addEventListener('click', () => { if (selectionBusy()) return; state.selection.clear(); renderSelection(); });
+$('select-shown').addEventListener('click', selectAllPhotos);
 $('download-selected').addEventListener('click', async () => {
-  const ids = [...state.selection]; if (!ids.length || state.downloading) return;
+  const ids = [...state.selection]; if (!ids.length || state.downloading || selectionBusy()) return;
   state.downloading = true; renderSelection();
   try {
     const archive = await api('/api/v1/photo-archives', { method: 'POST', body: JSON.stringify({ photoIds: ids }) });
@@ -352,7 +360,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', upd
 updateThemeColor();
 
 async function selectDay(date, timestamp, selected) {
-  if (selectingDay) return;
+  if (selectionBusy()) return;
   const request = state.request;
   selectingDay = true; state.selecting = true; renderSelection();
   try {
@@ -383,7 +391,7 @@ async function selectDay(date, timestamp, selected) {
 // Paint selection with a mouse; touch keeps its normal scrolling behavior.
 let selectionDrag = null, suppressSelectionClick = false, selectionFrame = 0;
 function paintSelection(x, y) {
-  if (!selectionDrag || !state.selecting) return;
+  if (!selectionDrag || !state.selecting || selectionBusy()) return;
   const card = document.elementFromPoint(x, y)?.closest('.photo');
   if (!card || selectionDrag.visited.has(card.dataset.photoId)) return;
   const id = card.dataset.photoId; selectionDrag.visited.add(id);
@@ -393,7 +401,7 @@ function paintSelection(x, y) {
   if (selectionDrag.selected) state.selection.add(id); else state.selection.delete(id);
 }
 function dragScroll() {
-  if (!selectionDrag || !state.selecting) return;
+  if (!selectionDrag || !state.selecting || selectionBusy()) return;
   const { x, y } = selectionDrag;
   const speed = y < 48 ? -12 : y > innerHeight - 48 ? 12 : 0;
   if (speed) { window.scrollBy(0, speed); paintSelection(x, y); renderSelection(); }
@@ -401,7 +409,7 @@ function dragScroll() {
 }
 $('gallery').addEventListener('pointerdown', event => {
   suppressSelectionClick = false;
-  if (!state.selecting || event.pointerType !== 'mouse' || event.button !== 0 || !event.target.closest('.photo-open, .photo-checkbox')) return;
+  if (!state.selecting || selectionBusy() || event.pointerType !== 'mouse' || event.button !== 0 || !event.target.closest('.photo-open, .photo-checkbox')) return;
   const card = event.target.closest('.photo'); if (!card) return;
   event.preventDefault();
   selectionDrag = { pointerId: event.pointerId, selected: !state.selection.has(card.dataset.photoId), visited: new Set(), x: event.clientX, y: event.clientY };
@@ -430,3 +438,53 @@ $('gallery').addEventListener('click', event => {
   if (suppressSelectionClick) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
 $('gallery').addEventListener('dragstart', event => { if (state.selecting) event.preventDefault(); });
+
+async function selectAllPhotos() {
+  if (selectionBusy() || state.loading || state.view !== 'photos') return;
+  const request = state.request;
+  endSelectionDrag(); state.selectingAll = true; state.selecting = true; renderSelection();
+  const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite) });
+  if (state.period) { const range = periodRange(state.period); params.set('from', range.from); params.set('until', range.until); }
+  try {
+    const next = new Set(state.selection); let cursor = '';
+    do {
+      if (cursor) params.set('cursor', cursor);
+      const data = await api(`/api/v1/photos?${params}`);
+      if (request !== state.request || $('app').hidden || !state.selecting) return;
+      for (const photo of data.photos) next.add(photo.id);
+      if (next.size > 1000) throw new Error('Select up to 1000 files at a time. Narrow your search or date filter.');
+      cursor = data.nextCursor;
+    } while (cursor);
+    state.selection = next;
+  } catch (error) { if (request === state.request && !$('app').hidden) status(error.message, true); }
+  finally { state.selectingAll = false; renderSelection(); }
+}
+
+$('delete-selected').addEventListener('click', async () => {
+  const ids = [...state.selection];
+  if (!ids.length || state.downloading || selectionBusy()) return;
+  const names = new Map(state.photos.map(photo => [photo.id, photo.name]));
+  const subject = ids.length === 1 ? `“${names.get(ids[0]) || 'the selected file'}”` : `${ids.length} selected files`;
+  if (!confirm(`Permanently delete ${subject}? This cannot be undone.`)) return;
+  endSelectionDrag(); state.deleting = true; renderSelection();
+  const deleted = new Set(), failures = [];
+  try {
+    for (const [index, id] of ids.entries()) {
+      if ($('app').hidden) break;
+      status(`Deleting ${index + 1} of ${ids.length}…`);
+      try { await api(`/api/v1/photos/${id}`, { method: 'DELETE' }); deleted.add(id); }
+      catch (error) {
+        if (error.status === 404) deleted.add(id);
+        else failures.push(`${names.get(id) || 'A selected file'}: ${error.message}`);
+      }
+    }
+    state.photos = state.photos.filter(photo => !deleted.has(photo.id));
+    for (const id of deleted) state.selection.delete(id);
+    dayPhotos.clear();
+    if (!state.selection.size) state.selecting = false;
+    if (!$('app').hidden) {
+      if (state.view === 'status') await refreshStatus(); else await load(true);
+      status(`${deleted.size} ${deleted.size === 1 ? 'file deleted' : 'files deleted'}.${failures.length ? '\n' + failures.join('\n') : ''}`, failures.length > 0);
+    }
+  } finally { state.deleting = false; renderSelection(); }
+});
