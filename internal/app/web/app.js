@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0 };
+const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos' };
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const sizeFormat = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
 
@@ -28,6 +28,7 @@ $('logout').addEventListener('click', async () => {
 });
 
 function setView(favorite) {
+  state.view = 'photos'; $('photo-panel').hidden = false; $('photo-path').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
   state.favorite = favorite; $('nav-all').classList.toggle('active', !favorite); $('nav-favorites').classList.toggle('active', favorite);
   $('nav-all').setAttribute('aria-current', favorite ? 'false' : 'page'); $('nav-favorites').setAttribute('aria-current', favorite ? 'page' : 'false');
   const title = favorite ? 'favorites' : 'photos'; $('page-title').textContent = title; $('crumb').textContent = title;
@@ -62,7 +63,6 @@ function render() {
   for (const [date, items] of groups) {
     const section = document.createElement('section'); section.className = 'date-group';
     const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = date;
-    const count = document.createElement('small'); count.textContent = `${items.length} ${items.length === 1 ? 'photo' : 'photos'}`; heading.append(count);
     const grid = document.createElement('div'); grid.className = 'photo-grid'; section.append(heading, grid);
     for (const { photo, index } of items) {
       const card = document.createElement('article'); card.className = 'photo';
@@ -73,7 +73,6 @@ function render() {
     }
     gallery.append(section);
   }
-  $('photo-count').textContent = `${state.photos.length} ${state.photos.length === 1 ? 'photo' : 'photos'} loaded`;
   $('load-more').hidden = !state.cursor; $('empty').hidden = state.photos.length !== 0 || state.loading;
   $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : 'No photos yet.';
   $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : 'Upload a few photos to get started.';
@@ -112,12 +111,12 @@ function showPhoto(index) {
   $('viewer-title').textContent = photo.name; $('viewer-meta').textContent = `${photo.width} × ${photo.height} · ${sizeFormat(photo.size)} · Added ${dateFormat.format(new Date(photo.addedAt))}`;
   $('viewer-image').src = `/api/v1/photos/${photo.id}/original`; $('viewer-image').alt = photo.name;
   $('viewer-favorite').textContent = photo.favorite ? '★ starred' : '☆ favorite'; $('viewer-favorite').setAttribute('aria-pressed', String(photo.favorite));
-  $('download').href = `/api/v1/photos/${photo.id}/original?download=1`; $('viewer-prev').disabled = index === 0; $('viewer-next').disabled = index === state.photos.length - 1;
-  $('viewer-error').textContent = ''; if (!$('viewer').open) $('viewer').showModal();
+  $('download').href = `/api/v1/photos/${photo.id}/original?download=1`; $('viewer-menu').open = false; $('viewer').setAttribute('aria-label', photo.name);
+  $('viewer-error').textContent = ''; if (!$('viewer').open) $('viewer').showModal(); $('viewer-image').focus({ preventScroll: true });
 }
 $('viewer-close').addEventListener('click', () => $('viewer').close());
 $('viewer').addEventListener('close', () => { $('viewer-image').removeAttribute('src'); });
-$('viewer-prev').addEventListener('click', () => showPhoto(state.selected - 1)); $('viewer-next').addEventListener('click', () => showPhoto(state.selected + 1));
+
 
 async function toggleFavorite(photo) {
   if (!photo || photo.busy) return; photo.busy = true;
@@ -125,7 +124,7 @@ async function toggleFavorite(photo) {
     const updated = await api(`/api/v1/photos/${photo.id}`, { method: 'PATCH', body: JSON.stringify({ favorite: !photo.favorite }) }); Object.assign(photo, updated);
     if (state.favorite && !photo.favorite) { state.photos = state.photos.filter(p => p.id !== photo.id); $('viewer').close(); }
     render(); if ($('viewer').open) showPhoto(state.selected);
-  } catch (error) { if ($('viewer').open) $('viewer-error').textContent = error.message; else status(error.message, true); }
+  } catch (error) { if ($('viewer').open) { $('viewer-menu').open = true; $('viewer-error').textContent = error.message; } else status(error.message, true); }
   finally { photo.busy = false; }
 }
 $('viewer-favorite').addEventListener('click', () => toggleFavorite(state.photos[state.selected]));
@@ -149,13 +148,14 @@ document.addEventListener('keydown', event => {
   if ($('viewer').open) {
     if (['h', 'ArrowLeft'].includes(event.key)) { event.preventDefault(); showPhoto(state.selected - 1); }
     if (['l', 'ArrowRight'].includes(event.key)) { event.preventDefault(); showPhoto(state.selected + 1); }
-    if (event.key === ' ') { event.preventDefault(); toggleFavorite(state.photos[state.selected]); }
+    if (event.key === ' ' && !event.target.closest('button, a, summary')) { event.preventDefault(); toggleFavorite(state.photos[state.selected]); }
     return;
   }
-  if (event.key === '/') { event.preventDefault(); $('search').focus(); return; }
+  if (event.key === '/') { event.preventDefault(); if (state.view === 'status') setView(state.favorite); $('search').focus(); return; }
   if (event.key === 'u') { event.preventDefault(); if (!state.uploading) $('file-input').click(); return; }
   if (event.key === 'f') { event.preventDefault(); setView(!state.favorite); return; }
   if (event.key === '?') { event.preventDefault(); $('help').showModal(); return; }
+  if (state.view === 'status') return;
   const cards = [...document.querySelectorAll('.photo-open')];
   if (!cards.length || !['h', 'j', 'k', 'l', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
@@ -168,3 +168,43 @@ document.addEventListener('keydown', event => {
 $('search').addEventListener('keydown', event => {
   if (event.key === 'Escape') { $('search').value = ''; state.query = ''; clearTimeout(searchTimer); $('search').blur(); load(true); }
 });
+
+const byteSize = n => {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let index = 0;
+  while (n >= 1024 && index < units.length - 1) { n /= 1024; index++; }
+  return `${n.toFixed(index ? 1 : 0)} ${units[index]}`;
+};
+async function refreshStatus() {
+  $('refresh-status').disabled = true; $('status-error').textContent = '';
+  try {
+    const data = await api('/api/v1/status');
+    const values = { photos: data.photos, favorites: data.favorites, originals: byteSize(data.originalBytes), thumbnails: byteSize(data.thumbnailBytes), library: byteSize(data.originalBytes + data.thumbnailBytes), pending: data.pendingDeletions, database: data.database, storage: data.storage, access: data.storageAccessible ? 'available' : 'unavailable' };
+    for (const [key, value] of Object.entries(values)) $(`usage-${key}`).textContent = value;
+    document.querySelectorAll('.disk-row').forEach(row => { row.hidden = !data.disk; });
+    if (data.disk) {
+      $('usage-total').textContent = byteSize(data.disk.total);
+      $('usage-used').textContent = `${byteSize(data.disk.used)} (${data.disk.total ? (data.disk.used / data.disk.total * 100).toFixed(1) : '0'}%)`;
+      $('usage-available').textContent = byteSize(data.disk.available);
+    }
+    $('disk-note').textContent = data.disk ? 'Volume usage includes everything on the filesystem, not just this library.' : 'Filesystem capacity is not reported for this storage provider or platform.';
+    $('status-checked').textContent = `checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB')}`;
+  } catch (error) { $('status-error').textContent = error.message; $('status-checked').textContent = 'status unavailable'; }
+  finally { $('refresh-status').disabled = false; }
+}
+$('nav-status').addEventListener('click', () => {
+  state.view = 'status'; $('photo-panel').hidden = true; $('photo-path').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
+  for (const id of ['nav-all', 'nav-favorites']) { $(id).classList.remove('active'); $(id).removeAttribute('aria-current'); }
+  $('nav-status').classList.add('active'); $('nav-status').setAttribute('aria-current', 'page');
+  refreshStatus();
+});
+$('refresh-status').addEventListener('click', refreshStatus);
+setInterval(() => { if (state.view === 'status' && !$('app').hidden && document.visibilityState === 'visible') refreshStatus(); }, 30000);
+let swipeStart;
+$('viewer-image').addEventListener('touchstart', event => { swipeStart = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null; }, { passive: true });
+$('viewer-image').addEventListener('touchend', event => {
+  if (!swipeStart || event.touches.length) { swipeStart = null; return; }
+  const touch = event.changedTouches[0], dx = touch.clientX - swipeStart.x, dy = touch.clientY - swipeStart.y;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) showPhoto(state.selected + (dx < 0 ? 1 : -1));
+  swipeStart = null;
+}, { passive: true });

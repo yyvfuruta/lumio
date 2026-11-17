@@ -4,5 +4,6 @@
 /.env.*
 !/.env.example
 /dist/
+/.local/
 *.test
 coverage.out

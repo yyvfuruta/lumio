@@ -221,6 +221,7 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 		t.Fatal("unsafe cookie")
 	}
 	assertCode(request(h2, "GET", "/api/v1/photos", nil, cookie, ""), 200)
+	assertCode(request(h1, "GET", "/api/v1/status", nil, nil, ""), 401)
 	csrf := httptest.NewRequest("POST", "http://photos.test/api/v1/photos", nil)
 	csrf.AddCookie(cookie)
 	w := httptest.NewRecorder()
@@ -250,6 +251,19 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 		t.Fatal(err)
 	}
 	p := uploaded.Photo
+	if w.Header().Get("Location") != "/api/v1/photos/"+p.ID {
+		t.Fatal("missing photo resource Location")
+	}
+	assertCode(request(h2, "GET", "/api/v1/photos/"+p.ID, nil, cookie, ""), 200)
+	statusResponse := request(h2, "GET", "/api/v1/status", nil, cookie, "")
+	assertCode(statusResponse, 200)
+	var usage libraryStatus
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &usage); err != nil {
+		t.Fatal(err)
+	}
+	if usage.Photos != 1 || usage.OriginalBytes != int64(len(pngData)) || usage.ThumbnailBytes == 0 || !usage.StorageAccessible {
+		t.Fatalf("incorrect library status: %+v", usage)
+	}
 	if p.Name != "memória.png" || p.Width != 100 || p.Height != 70 {
 		t.Fatalf("unexpected metadata: %+v", p)
 	}
@@ -408,5 +422,18 @@ func TestCopyVerified(t *testing.T) {
 	}
 	if err := copyVerified(ctx, source, target, "original", "image/png", 99, ""); err == nil {
 		t.Fatal("accepted wrong source size")
+	}
+}
+
+func TestLocalBucketDoesNotStageOnAnotherVolume(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root+"/unavailable-temp-directory")
+	b, err := openBucket(context.Background(), (&url.URL{Scheme: "file", Path: root}).String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	if err := b.Upload(context.Background(), "photo/original", strings.NewReader("original bytes"), &blob.WriterOptions{ContentType: "image/jpeg"}); err != nil {
+		t.Fatal(err)
 	}
 }

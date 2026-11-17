@@ -40,6 +40,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions", a.login)
 	mux.HandleFunc("DELETE /api/v1/sessions/current", a.logout)
 	mux.HandleFunc("GET /api/v1/photos", a.protect(a.listPhotos))
+	mux.HandleFunc("GET /api/v1/status", a.protect(a.status))
 	mux.HandleFunc("POST /api/v1/photos", a.protect(a.upload))
 	mux.HandleFunc("GET /api/v1/photos/{id}", a.protect(a.getPhoto))
 	mux.HandleFunc("PATCH /api/v1/photos/{id}", a.protect(a.favorite))
