@@ -10,6 +10,7 @@ Base path: `/api/v1`. Resources and HTTP methods follow the conventions in [REST
 | GET | `/status` | Authenticated library counts, byte sizes, disk capacity where available, and database/storage availability |
 | GET | `/photos` | List photos, newest upload first; returns `photos` and `nextCursor` |
 | POST | `/photos` | Multipart upload, one file in the `photo` field; returns `201` and `Location` for a new photo, or `200` for identical existing bytes |
+| GET | `/photos/timeline` | Upload months and counts; accepts `q`, `favorite`, and IANA `tz` (default UTC) |
 | GET | `/photos/{id}` | Photo metadata |
 | PATCH | `/photos/{id}` | Update `{"favorite":true}` or `{"favorite":false}`; returns updated metadata |
 | DELETE | `/photos/{id}` | Hide photo and queue object removal; returns `204` |
@@ -24,6 +25,7 @@ Collection parameters:
 
 - `q`: case-insensitive filename substring, up to 200 UTF-8 bytes.
 - `favorite=true`: favorites only.
+- `from` / `until`: optional RFC 3339 upload-time bounds, inclusive / exclusive; preserved when following cursors.
 - `cursor`: opaque cursor returned by the previous response; keep the same filters when following it.
 
 Pages contain at most 60 photos. An empty `nextCursor` means the last page. Pagination uses `(added_at, id)` ordering; it does not use database offsets.

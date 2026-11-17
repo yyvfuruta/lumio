@@ -222,6 +222,10 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 	}
 	assertCode(request(h2, "GET", "/api/v1/photos", nil, cookie, ""), 200)
 	assertCode(request(h1, "GET", "/api/v1/status", nil, nil, ""), 401)
+	assertCode(request(h1, "GET", "/api/v1/photos/timeline", nil, nil, ""), 401)
+	assertCode(request(h1, "GET", "/api/v1/photos?from=invalid", nil, cookie, ""), 400)
+	assertCode(request(h1, "GET", "/api/v1/photos?from=2021-01-01T00:00:00Z&until=2020-01-01T00:00:00Z", nil, cookie, ""), 400)
+	assertCode(request(h1, "GET", "/api/v1/photos/timeline?tz=not-a-zone", nil, cookie, ""), 400)
 	csrf := httptest.NewRequest("POST", "http://photos.test/api/v1/photos", nil)
 	csrf.AddCookie(cookie)
 	w := httptest.NewRecorder()
@@ -305,6 +309,50 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+	w = request(h1, "GET", "/api/v1/photos/timeline?tz=UTC", nil, cookie, "")
+	assertCode(w, 200)
+	var timeline struct {
+		Months []timelineMonth `json:"months"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &timeline); err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline.Months) != 2 || timeline.Months[1].Month != "2020-01" || timeline.Months[1].Count != 65 {
+		t.Fatalf("bad timeline: %+v", timeline)
+	}
+	w = request(h1, "GET", "/api/v1/photos/timeline?tz=America%2FSao_Paulo", nil, cookie, "")
+	assertCode(w, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &timeline); err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline.Months) != 2 || timeline.Months[1].Month != "2019-12" || timeline.Months[1].Count != 65 {
+		t.Fatalf("timeline ignored local timezone: %+v", timeline)
+	}
+	w = request(h1, "GET", "/api/v1/photos?from=2020-01-01T00:00:00Z&until=2021-01-01T00:00:00Z", nil, cookie, "")
+	assertCode(w, 200)
+	var filtered struct {
+		Photos []Photo `json:"photos"`
+		Next   string  `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &filtered); err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Photos) != 60 || filtered.Next == "" {
+		t.Fatal("bad filtered page")
+	}
+	for _, photo := range filtered.Photos {
+		if photo.ID == p.ID {
+			t.Fatal("date range included an out-of-range photo")
+		}
+	}
+	w = request(h2, "GET", "/api/v1/photos?from=2020-01-01T00:00:00Z&until=2021-01-01T00:00:00Z&cursor="+filtered.Next, nil, cookie, "")
+	assertCode(w, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &filtered); err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Photos) != 5 || filtered.Next != "" {
+		t.Fatal("bad filtered second page")
 	}
 	var page struct {
 		Photos []Photo `json:"photos"`

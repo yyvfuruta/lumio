@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos' };
+const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0 };
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const sizeFormat = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
 
@@ -42,9 +42,10 @@ async function load(reset = false) {
   if (!reset && state.loading) return;
   const request = ++state.request; state.loading = true;
   $('load-more').disabled = true;
-  if (reset) { state.photos = []; state.cursor = ''; render(); }
+  if (reset) { state.photos = []; state.cursor = ''; render(); loadTimeline(); }
   const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite) });
   if (state.cursor) params.set('cursor', state.cursor);
+  if (state.period) { const range = periodRange(state.period); params.set('from', range.from); params.set('until', range.until); }
   try {
     const data = await api(`/api/v1/photos?${params}`); if (request !== state.request) return;
     state.photos.push(...data.photos); state.cursor = data.nextCursor; render();
@@ -73,9 +74,10 @@ function render() {
     }
     gallery.append(section);
   }
+  $('crumb').textContent = `${state.favorite ? 'favorites' : 'photos'}${state.period ? ' / ' + state.period : ''}`;
   $('load-more').hidden = !state.cursor; $('empty').hidden = state.photos.length !== 0 || state.loading;
-  $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : 'No photos yet.';
-  $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : 'Upload a few photos to get started.';
+  $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : state.period ? 'No photos in this period.' : 'No photos yet.';
+  $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload a few photos to get started.';
   $('empty-upload').hidden = state.favorite || !!state.query;
 }
 
@@ -208,3 +210,39 @@ $('viewer-image').addEventListener('touchend', event => {
   if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) showPhoto(state.selected + (dx < 0 ? 1 : -1));
   swipeStart = null;
 }, { passive: true });
+
+function periodRange(period) {
+  const [year, month] = period.split('-').map(Number);
+  const from = new Date(year, month ? month - 1 : 0, 1);
+  const until = new Date(month ? year : year + 1, month || 0, 1);
+  return { from: from.toISOString(), until: until.toISOString() };
+}
+function choosePeriod(period) {
+  state.period = period;
+  load(true);
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+async function loadTimeline() {
+  const request = ++state.timelineRequest;
+  const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite), tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' });
+  try {
+    const data = await api(`/api/v1/photos/timeline?${params}`);
+    if (request !== state.timelineRequest || $('app').hidden) return;
+    const rail = $('timeline'); rail.replaceChildren();
+    const button = (text, period, label, className) => {
+      const node = document.createElement('button'); node.textContent = text; node.className = className;
+      node.setAttribute('aria-label', label); node.title = label;
+      if (period === state.period) { node.classList.add('selected'); node.setAttribute('aria-current', 'date'); }
+      node.addEventListener('click', () => choosePeriod(period)); return node;
+    };
+    rail.append(button('all', '', 'Show all upload dates', 'timeline-all'));
+    let year;
+    const monthFormat = new Intl.DateTimeFormat('en', { month: 'short' });
+    for (const item of data.months) {
+      const [itemYear, month] = item.month.split('-');
+      if (itemYear !== year) { year = itemYear; rail.append(button(year, year, `Uploads in ${year}`, 'timeline-year')); }
+      const label = monthFormat.format(new Date(Number(year), Number(month) - 1, 1));
+      rail.append(button(label, item.month, `${label} ${year}: ${item.count} ${item.count === 1 ? 'photo' : 'photos'}`, 'timeline-month'));
+    }
+  } catch (error) { if (request === state.timelineRequest && !$('app').hidden) status(error.message, true); }
+}

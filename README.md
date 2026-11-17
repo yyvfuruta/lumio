@@ -7,7 +7,7 @@ A small personal photo library in Go. One binary, a PostgreSQL database, and eit
 - Single-user password login with shared PostgreSQL sessions.
 - JPEG, PNG, and GIF uploads, immutable originals, and JPEG thumbnails.
 - SHA-256 deduplication, favorites, filename search, download, and deletion.
-- Timeline grouped by upload date, with cursor pagination.
+- Timeline grouped by upload date, with a vertical year/month browser and cursor pagination.
 - Keyboard navigation: `h j k l`, `/` to search, `u` to upload, `?` for help.
 - Local/PVC, S3-compatible storage (including Garage), GCS, and Azure Blob through [Go CDK](https://gocloud.dev/howto/blob/).
 - Status panel with library size, filesystem usage, and database/storage availability.
@@ -155,8 +155,9 @@ GoReleaser creates Linux/macOS/Windows binaries for amd64 and arm64, archives, c
 
 ```sh
 make release-check
-make release-snapshot          # local artifacts only; no publishing
 ```
+
+Release builds run in GitHub Actions only; do not run local GoReleaser snapshots.
 
 To publish the first release after reviewing CI, ensure `VERSION` is `0.1.0`, commit the changes, push main so the workflow is registered, then push an annotated tag separately:
 

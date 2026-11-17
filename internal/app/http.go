@@ -40,6 +40,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions", a.login)
 	mux.HandleFunc("DELETE /api/v1/sessions/current", a.logout)
 	mux.HandleFunc("GET /api/v1/photos", a.protect(a.listPhotos))
+	mux.HandleFunc("GET /api/v1/photos/timeline", a.protect(a.timeline))
 	mux.HandleFunc("GET /api/v1/status", a.protect(a.status))
 	mux.HandleFunc("POST /api/v1/photos", a.protect(a.upload))
 	mux.HandleFunc("GET /api/v1/photos/{id}", a.protect(a.getPhoto))
@@ -68,6 +69,11 @@ func (a *App) listPhotos(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "search query is too long")
 		return
 	}
+	from, until, err := photoRange(q.Get("from"), q.Get("until"))
+	if err != nil {
+		problem(w, 400, err.Error())
+		return
+	}
 	before := time.Now().Add(24 * time.Hour)
 	beforeID := strings.Repeat("f", 64)
 	if cursor := q.Get("cursor"); cursor != "" {
@@ -85,7 +91,9 @@ func (a *App) listPhotos(w http.ResponseWriter, r *http.Request) {
 		beforeID = parts[1]
 	}
 	rows, err := a.db.Query(r.Context(), "SELECT "+columns+` FROM lumio_photos WHERE deleted_at IS NULL AND (NOT $1::boolean OR favorite)
-	 AND strpos(lower(name),lower($2))>0 AND (added_at,id)<($3,$4) ORDER BY added_at DESC,id DESC LIMIT 61`, q.Get("favorite") == "true", search, before, beforeID)
+	 AND strpos(lower(name),lower($2))>0 AND (added_at,id)<($3,$4)
+	 AND ($5::timestamptz IS NULL OR added_at >= $5) AND ($6::timestamptz IS NULL OR added_at < $6)
+	 ORDER BY added_at DESC,id DESC LIMIT 61`, q.Get("favorite") == "true", search, before, beforeID, from, until)
 	if err != nil {
 		internal(w, err)
 		return

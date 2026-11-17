@@ -1,4 +1,4 @@
-.PHONY: run build test test-integration dev down release-check release-snapshot
+.PHONY: run build test test-integration dev down release-check
 
 run:
 	go run ./cmd/lumio
@@ -16,5 +16,3 @@ down:
 	docker compose down
 release-check:
 	goreleaser check
-release-snapshot:
-	goreleaser release --snapshot --clean
