@@ -26,7 +26,7 @@ func (a *App) authenticated(r *http.Request) bool {
 func (a *App) protect(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.authenticated(r) {
-			problem(w, http.StatusUnauthorized, "entre para acessar suas fotos")
+			problem(w, http.StatusUnauthorized, "sign in to access your photos")
 			return
 		}
 		next(w, r)
@@ -67,12 +67,12 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if attempts > 20 {
 		w.Header().Set("Retry-After", "60")
-		problem(w, 429, "muitas tentativas; aguarde um minuto")
+		problem(w, 429, "too many attempts; wait one minute")
 		return
 	}
 	hash := sha256.Sum256([]byte(input.Password))
 	if subtle.ConstantTimeCompare(hash[:], a.passwordTag[:]) != 1 {
-		problem(w, 401, "senha incorreta")
+		problem(w, 401, "incorrect password")
 		return
 	}
 	var token [32]byte
@@ -89,7 +89,8 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: value, Path: "/", HttpOnly: true, Secure: a.cfg.SecureCookie, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: 7 * 24 * 3600})
-	jsonResponse(w, 200, map[string]bool{"authenticated": true})
+	w.Header().Set("Location", "/api/v1/sessions/current")
+	jsonResponse(w, http.StatusCreated, map[string]bool{"authenticated": true})
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {

@@ -61,7 +61,7 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 	if stored != cfg.StorageURL {
-		return nil, errors.New("storage difere do cadastrado no PostgreSQL; migre os objetos antes de alterar lumio_settings")
+		return nil, errors.New("storage does not match PostgreSQL settings; run migrate-storage before switching backends")
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (a *App) maintenance(ctx context.Context) {
 			cancel()
 			if err != nil {
 				if ctx.Err() == nil {
-					slog.Error("limpeza de fotos pendente", "error", err)
+					slog.Error("photo cleanup pending", "error", err)
 				}
 				break
 			}
@@ -107,7 +107,7 @@ func (a *App) maintenance(ctx context.Context) {
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {
-			slog.Error("limpeza de sessões", "error", err)
+			slog.Error("session cleanup failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():

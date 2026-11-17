@@ -23,8 +23,8 @@ import (
 	"gocloud.dev/gcerrors"
 )
 
-var errImage = errors.New("use JPEG, PNG ou GIF válido, com até 40 megapixels")
-var errTooLarge = errors.New("arquivo excede o limite de upload")
+var errImage = errors.New("use a valid JPEG, PNG, or GIF image up to 40 megapixels")
+var errTooLarge = errors.New("file exceeds the upload limit")
 
 type Photo struct {
 	ID        string    `json:"id"`
@@ -98,13 +98,16 @@ func (a *App) addPhoto(ctx context.Context, name string, src io.Reader) (Photo, 
 	}
 	p := Photo{ID: hex.EncodeToString(hash.Sum(nil)), Name: filepath.Base(strings.ReplaceAll(name, "\\", "/")), Type: mime, Size: n, ThumbSize: int64(thumb.Len()), Width: cfg.Width, Height: cfg.Height}
 	if len(p.Name) > 255 {
-		p.Name = "foto"
+		p.Name = "photo"
 	}
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return Photo{}, false, err
 	}
 	defer tx.Rollback(context.Background())
+	if err := a.storageGuard(ctx, tx); err != nil {
+		return Photo{}, false, err
+	}
 	if err := photoLock(ctx, tx, p.ID); err != nil {
 		return Photo{}, false, err
 	}
@@ -140,6 +143,9 @@ func (a *App) collectOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback(context.Background())
+	if err := a.storageGuard(ctx, tx); err != nil {
+		return false, err
+	}
 	var id string
 	err = tx.QueryRow(ctx, "SELECT id FROM lumio_photos WHERE deleted_at IS NOT NULL ORDER BY deleted_at LIMIT 1").Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

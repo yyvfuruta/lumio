@@ -75,7 +75,7 @@ func TestCSRF(t *testing.T) {
 	}{
 		{"", "", "", false}, {"1", "", "", true}, {"1", "https://photos.test", "same-origin", true}, {"1", "https://evil.test", "", false}, {"1", "null", "", false}, {"1", "https://photos.test", "cross-site", false},
 	} {
-		r := httptest.NewRequest("POST", "https://photos.test/api/photos", nil)
+		r := httptest.NewRequest("POST", "https://photos.test/api/v1/photos", nil)
 		r.Header.Set("X-Lumio-Request", tc.header)
 		r.Header.Set("Origin", tc.origin)
 		r.Header.Set("Sec-Fetch-Site", tc.site)
@@ -212,16 +212,16 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 			t.Fatalf("got %d want %d: %s", w.Code, want, w.Body.String())
 		}
 	}
-	assertCode(request(h1, "GET", "/api/photos", nil, nil, ""), 401)
-	assertCode(request(h1, "POST", "/api/login", strings.NewReader(`{"password":"wrong"}`), nil, "application/json"), 401)
-	login := request(h1, "POST", "/api/login", strings.NewReader(`{"password":"integration-test-password"}`), nil, "application/json")
-	assertCode(login, 200)
+	assertCode(request(h1, "GET", "/api/v1/photos", nil, nil, ""), 401)
+	assertCode(request(h1, "POST", "/api/v1/sessions", strings.NewReader(`{"password":"wrong"}`), nil, "application/json"), 401)
+	login := request(h1, "POST", "/api/v1/sessions", strings.NewReader(`{"password":"integration-test-password"}`), nil, "application/json")
+	assertCode(login, 201)
 	cookie := login.Result().Cookies()[0]
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe cookie")
 	}
-	assertCode(request(h2, "GET", "/api/photos", nil, cookie, ""), 200)
-	csrf := httptest.NewRequest("POST", "http://photos.test/api/photos", nil)
+	assertCode(request(h2, "GET", "/api/v1/photos", nil, cookie, ""), 200)
+	csrf := httptest.NewRequest("POST", "http://photos.test/api/v1/photos", nil)
 	csrf.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	h1.ServeHTTP(w, csrf)
@@ -236,7 +236,7 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 		}
 		part.Write(data)
 		writer.Close()
-		return request(handler, "POST", "/api/photos", &body, cookie, writer.FormDataContentType())
+		return request(handler, "POST", "/api/v1/photos", &body, cookie, writer.FormDataContentType())
 	}
 	assertCode(upload(h1, []byte("not an image")), 415)
 	assertCode(upload(h1, make([]byte, (1<<20)+1)), 413)
@@ -267,19 +267,19 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 			t.Fatalf("concurrent dedup: %d", code)
 		}
 	}
-	w = request(h2, "GET", "/media/"+p.ID+"/original", nil, cookie, "")
+	w = request(h2, "GET", "/api/v1/photos/"+p.ID+"/original", nil, cookie, "")
 	assertCode(w, 200)
 	if !bytes.Equal(w.Body.Bytes(), pngData) {
 		t.Fatal("original changed")
 	}
-	assertCode(request(h2, "GET", "/media/"+p.ID+"/thumb.jpg", nil, nil, ""), 401)
-	w = request(h2, "GET", "/media/"+p.ID+"/thumb.jpg", nil, cookie, "")
+	assertCode(request(h2, "GET", "/api/v1/photos/"+p.ID+"/thumbnail", nil, nil, ""), 401)
+	w = request(h2, "GET", "/api/v1/photos/"+p.ID+"/thumbnail", nil, cookie, "")
 	assertCode(w, 200)
 	if _, _, err := image.Decode(w.Body); err != nil {
 		t.Fatal(err)
 	}
-	assertCode(request(h2, "PATCH", "/api/photos/"+p.ID, strings.NewReader(`{"favorite":true}`), cookie, "application/json"), 200)
-	w = request(h1, "GET", "/api/photos?favorite=true&q=mem", nil, cookie, "")
+	assertCode(request(h2, "PATCH", "/api/v1/photos/"+p.ID, strings.NewReader(`{"favorite":true}`), cookie, "application/json"), 200)
+	w = request(h1, "GET", "/api/v1/photos?favorite=true&q=mem", nil, cookie, "")
 	assertCode(w, 200)
 	if !strings.Contains(w.Body.String(), p.ID) {
 		t.Fatal("favorite/search missing")
@@ -296,7 +296,7 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 		Photos []Photo `json:"photos"`
 		Next   string  `json:"nextCursor"`
 	}
-	w = request(h1, "GET", "/api/photos", nil, cookie, "")
+	w = request(h1, "GET", "/api/v1/photos", nil, cookie, "")
 	assertCode(w, 200)
 	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
@@ -308,7 +308,7 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 	for _, photo := range page.Photos {
 		seen[photo.ID] = true
 	}
-	w = request(h2, "GET", "/api/photos?cursor="+page.Next, nil, cookie, "")
+	w = request(h2, "GET", "/api/v1/photos?cursor="+page.Next, nil, cookie, "")
 	assertCode(w, 200)
 	json.Unmarshal(w.Body.Bytes(), &page)
 	if len(page.Photos) != 6 || page.Next != "" {
@@ -319,8 +319,8 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 			t.Fatal("pagination duplicated photo")
 		}
 	}
-	assertCode(request(h1, "DELETE", "/api/photos/"+p.ID, nil, cookie, ""), 204)
-	assertCode(request(h2, "GET", "/media/"+p.ID+"/original", nil, cookie, ""), 404)
+	assertCode(request(h1, "DELETE", "/api/v1/photos/"+p.ID, nil, cookie, ""), 204)
+	assertCode(request(h2, "GET", "/api/v1/photos/"+p.ID+"/original", nil, cookie, ""), 404)
 	if _, err := a.collectOne(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -333,13 +333,80 @@ func testIntegration(t *testing.T, databaseURL, storageURL string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCode(request(c.Handler(), "GET", "/media/"+p.ID+"/original", nil, cookie, ""), 200)
+	assertCode(request(c.Handler(), "GET", "/api/v1/photos/"+p.ID+"/original", nil, cookie, ""), 200)
 	c.Close()
-	assertCode(request(h1, "POST", "/api/logout", nil, cookie, ""), 204)
-	assertCode(request(h2, "GET", "/api/photos", nil, cookie, ""), 401)
+	assertCode(request(h1, "DELETE", "/api/v1/sessions/current", nil, cookie, ""), 204)
+	assertCode(request(h2, "GET", "/api/v1/photos", nil, cookie, ""), 401)
+	// A PVC-to-bucket migration verifies copies, retains originals, and fences old replicas.
+	if _, err := a.db.Exec(ctx, "DELETE FROM lumio_photos WHERE name='page'"); err != nil {
+		t.Fatal(err)
+	}
+	targetURL := (&url.URL{Scheme: "file", Path: t.TempDir()}).String()
+	if su.Scheme == "file" && os.Getenv("LUMIO_TEST_STORAGE_URL") != "" {
+		tu, err := url.Parse(os.Getenv("LUMIO_TEST_STORAGE_URL"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tq := tu.Query()
+		tq.Set("prefix", schemaName+"/migrated/")
+		tu.RawQuery = tq.Encode()
+		targetURL = tu.String()
+	}
+	if err := MigrateStorage(ctx, cfg.DatabaseURL, targetURL); err != nil {
+		t.Fatal(err)
+	}
+	assertCode(request(h1, "GET", "/readyz", nil, nil, ""), 503)
+	if exists, err := a.bucket.Exists(ctx, p.ID+"/original"); err != nil || !exists {
+		t.Fatalf("migration removed source: %v", err)
+	}
+	if _, _, err := a.addPhoto(ctx, "stale.png", bytes.NewReader(pngData)); err == nil {
+		t.Fatal("stale replica accepted an upload")
+	}
+	cfg.StorageURL = targetURL
+	migrated, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	assertCode(request(migrated.Handler(), "GET", "/readyz", nil, nil, ""), 200)
+	got, err := migrated.bucket.ReadAll(ctx, p.ID+"/original")
+	if err != nil || !bytes.Equal(got, pngData) {
+		t.Fatalf("migration changed original: %v", err)
+	}
+	for _, key := range []string{p.ID + "/original", p.ID + "/thumb.jpg"} {
+		if err := migrated.bucket.Delete(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, key := range []string{p.ID + "/original", p.ID + "/thumb.jpg"} {
 		if err := a.bucket.Delete(ctx, key); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestCopyVerified(t *testing.T) {
+	ctx := context.Background()
+	source, target := memblob.OpenBucket(nil), memblob.OpenBucket(nil)
+	defer source.Close()
+	defer target.Close()
+	want := []byte("original bytes")
+	sum := sha256.Sum256(want)
+	if err := source.WriteAll(ctx, "original", want, nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := copyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := target.WriteAll(ctx, "original", []byte("corruption"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err == nil {
+		t.Fatal("accepted corrupt destination")
+	}
+	if err := copyVerified(ctx, source, target, "original", "image/png", 99, ""); err == nil {
+		t.Fatal("accepted wrong source size")
 	}
 }
