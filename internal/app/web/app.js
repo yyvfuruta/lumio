@@ -28,10 +28,10 @@ $('logout').addEventListener('click', async () => {
 });
 
 function setView(favorite) {
-  state.view = 'photos'; $('photo-panel').hidden = false; $('photo-path').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
+  state.view = 'photos'; $('photo-panel').hidden = false; $('status-panel').hidden = true; $('nav-status').classList.remove('active'); $('nav-status').removeAttribute('aria-current'); $('search').hidden = false;
   state.favorite = favorite; $('nav-all').classList.toggle('active', !favorite); $('nav-favorites').classList.toggle('active', favorite);
   $('nav-all').setAttribute('aria-current', favorite ? 'false' : 'page'); $('nav-favorites').setAttribute('aria-current', favorite ? 'page' : 'false');
-  const title = favorite ? 'favorites' : 'photos'; $('page-title').textContent = title; $('crumb').textContent = title;
+  const title = favorite ? 'favorites' : 'photos'; $('page-title').textContent = title;
   load(true);
 }
 $('nav-all').addEventListener('click', () => setView(false)); $('nav-favorites').addEventListener('click', () => setView(true));
@@ -74,7 +74,7 @@ function render() {
     }
     gallery.append(section);
   }
-  $('crumb').textContent = `${state.favorite ? 'favorites' : 'photos'}${state.period ? ' / ' + state.period : ''}`;
+  $('page-title').textContent = `${state.favorite ? 'favorites' : 'photos'}${state.period ? ' / ' + state.period : ''}`;
   $('load-more').hidden = !state.cursor; $('empty').hidden = state.photos.length !== 0 || state.loading;
   $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : state.period ? 'No photos in this period.' : 'No photos yet.';
   $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the star on a photo to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload a few photos to get started.';
@@ -195,7 +195,7 @@ async function refreshStatus() {
   finally { $('refresh-status').disabled = false; }
 }
 $('nav-status').addEventListener('click', () => {
-  state.view = 'status'; $('photo-panel').hidden = true; $('photo-path').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
+  state.view = 'status'; $('photo-panel').hidden = true; $('status-panel').hidden = false; $('search').hidden = true;
   for (const id of ['nav-all', 'nav-favorites']) { $(id).classList.remove('active'); $(id).removeAttribute('aria-current'); }
   $('nav-status').classList.add('active'); $('nav-status').setAttribute('aria-current', 'page');
   refreshStatus();

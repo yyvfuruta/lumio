@@ -19,13 +19,11 @@ a:hover { text-decoration: underline; }
 .tabs-row nav { display: flex; gap: 3px; }
 .tab { background: none; border: 0; padding: 5px 12px; }
 .tab.active { background: var(--text); color: #222; }
-.tab-tools { display: flex; gap: 8px; align-items: center; padding-bottom: 5px; font-size: 11px; }
+.tab-tools { display: flex; gap: 8px; align-items: center; padding-bottom: 5px; font-size: 13px; }
 .tab-tools input { width: 180px; }
 .library { padding: 0 6px 25px; }
-.path-line { font-size: 11px; color: var(--text); padding: 14px 0 4px; }
-.path-line span { color: var(--text); }
 .date-group { margin: 25px 0 30px; }
-.date-heading { padding: 3px 0; margin: 0 0 12px; border-bottom: 1px solid #444; color: var(--text); font-size: 11px; font-weight: 400; }
+.date-heading { padding: 3px 0; margin: 0 0 12px; border-bottom: 1px solid #444; color: var(--text); font-size: 14px; font-weight: 400; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .photo { position: relative; min-width: 0; }
 .photo-open { display: block; background: transparent; width: 100%; border: 0; padding: 0; aspect-ratio: 4/3; }
@@ -105,11 +103,11 @@ dialog::backdrop { background: #000e; }
 #viewer-menu > summary::-webkit-details-marker { display: none; }
 #viewer-menu > summary:focus-visible { outline: 1px solid #ddd; }
 .viewer-menu-content { position: absolute; right: 0; bottom: 42px; width: min(350px, calc(100vw - 32px)); padding: 16px; background: #222; border: 1px solid #555; }
-.viewer-menu-content h2 { font-size: 11px; font-weight: 400; overflow-wrap: anywhere; margin: 0 0 9px; }
-.viewer-menu-content p { font-size: 10px; color: var(--text); margin: 6px 0; }
-.viewer-menu-content > span { font-size: 10px; }
+.viewer-menu-content h2 { font-size: 15px; font-weight: 400; overflow-wrap: anywhere; margin: 0 0 9px; }
+.viewer-menu-content p { font-size: 13px; color: var(--text); margin: 6px 0; }
+.viewer-menu-content > span { font-size: 13px; }
 .viewer-menu-content .viewer-actions { display: flex; flex-direction: column; align-items: stretch; margin-top: 14px; gap: 7px; }
-.viewer-menu-content .viewer-actions > * { text-align: left; background: none; border: 0; padding: 4px 0; font-size: 11px; }
+.viewer-menu-content .viewer-actions > * { text-align: left; background: none; border: 0; padding: 5px 0; font-size: 14px; }
 .viewer-menu-content .viewer-actions > *:hover { text-decoration: underline; }
 
 #photo-panel { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 20px; align-items: start; }
