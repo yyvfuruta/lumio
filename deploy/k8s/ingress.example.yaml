@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lumio
+  namespace: lumio
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [photos.example.com]
+      secretName: lumio-tls
+  rules:
+    - host: photos.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lumio
+                port:
+                  name: http

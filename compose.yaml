@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lumio
+      POSTGRES_PASSWORD: lumio-dev-only
+      POSTGRES_DB: lumio
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumio -d lumio"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  garage:
+    profiles: [bucket]
+    image: dxflrs/garage:v2.5.0
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000001"
+      GARAGE_DEFAULT_ACCESS_KEY: GK00000000000000000000000000000001
+      GARAGE_DEFAULT_SECRET_KEY: lumio-garage-development-secret-only
+      GARAGE_DEFAULT_BUCKET: lumio
+    ports:
+      - "127.0.0.1:3900:3900"
+    volumes:
+      - ./deploy/dev/garage.toml:/etc/garage.toml:ro
+      - garage-data:/var/lib/garage
+    healthcheck:
+      test: ["CMD", "/garage", "bucket", "info", "lumio"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  app:
+    image: lumio:dev
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATABASE_URL: postgres://lumio:lumio-dev-only@postgres:5432/lumio?sslmode=disable
+      LUMIO_PASSWORD: ${LUMIO_PASSWORD:?set LUMIO_PASSWORD in .env}
+      LUMIO_SECURE_COOKIE: "false"
+      LUMIO_STORAGE_URL: file:///data
+    volumes:
+      - photos:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+volumes:
+  postgres-data:
+  garage-data:
+  photos:

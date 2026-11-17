@@ -1,0 +1,12 @@
+# Optional: docker compose -f compose.yaml -f compose.bucket.yaml --profile bucket up --no-build -d (build lumio:dev first)
+# Use a fresh PostgreSQL database, or migrate the existing photos before switching.
+services:
+  app:
+    environment:
+      LUMIO_STORAGE_URL: "s3://lumio?region=garage&endpoint=http://garage:3900&use_path_style=true"
+      AWS_ACCESS_KEY_ID: GK00000000000000000000000000000001
+      AWS_SECRET_ACCESS_KEY: lumio-garage-development-secret-only
+      AWS_EC2_METADATA_DISABLED: "true"
+    depends_on:
+      garage:
+        condition: service_healthy

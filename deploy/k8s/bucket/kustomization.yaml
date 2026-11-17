@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+patches:
+  - path: storage.yaml
+  - target:
+      kind: ConfigMap
+      name: lumio-config
+    patch: |-
+      - op: replace
+        path: /data/LUMIO_STORAGE_URL
+        value: "s3://lumio?region=garage&endpoint=http://garage.garage.svc:3900&use_path_style=true"

@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting and dependency files
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Start PostgreSQL and Garage
+        run: docker compose --profile bucket up -d --wait postgres garage
+        env:
+          LUMIO_PASSWORD: ci-development-password
+      - name: Test with the race detector, PostgreSQL, and Garage
+        run: go test -race -count=1 ./...
+        env:
+          LUMIO_TEST_DATABASE_URL: postgres://lumio:lumio-dev-only@localhost:5432/lumio?sslmode=disable
+          LUMIO_TEST_STORAGE_URL: s3://lumio?region=garage&endpoint=http://localhost:3900&use_path_style=true
+          AWS_ACCESS_KEY_ID: GK00000000000000000000000000000001
+          AWS_SECRET_ACCESS_KEY: lumio-garage-development-secret-only
+          AWS_EC2_METADATA_DISABLED: 'true'
+      - name: Vet and build
+        run: |
+          go vet ./...
+          make build
+      - name: Validate Kubernetes manifests
+        run: |
+          kubectl kustomize deploy/k8s/pvc > /tmp/lumio-pvc.yaml
+          kubectl kustomize deploy/k8s/bucket > /tmp/lumio-bucket.yaml
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.20.0
+          args: check
+      - name: Stop test services
+        if: always()
+        run: docker compose --profile bucket down -v
+        env:
+          LUMIO_PASSWORD: ci-development-password

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lumio-config
+data:
+  LUMIO_ADDR: ":8080"
+  LUMIO_STORAGE_URL: file:///data
+  LUMIO_SECURE_COOKIE: "true"
+  LUMIO_MAX_UPLOAD_MB: "32"
