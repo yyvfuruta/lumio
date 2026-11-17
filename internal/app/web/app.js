@@ -1,8 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false, deleting: false, selectingAll: false };
+const state = { photos: [], favorite: false, cursor: '', query: '', selected: -1, maxUpload: 32 << 20, uploading: false, loading: false, request: 0, view: 'photos', period: '', timelineRequest: 0, selection: new Set(), selecting: false, downloading: false, deleting: false, selectingAll: false, loadError: false };
 const dayPhotos = new Map();
-let selectingDay = false;
+let selectingDay = false, autoLoadFrame = 0;
 const selectionBusy = () => state.deleting || state.selectingAll || selectingDay;
 const dateFormat = new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const isVideo = photo => photo.type.startsWith('video/');
@@ -44,37 +44,67 @@ let searchTimer;
 $('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.query = $('search').value.trim(); load(true); }, 250); });
 
 async function load(reset = false) {
-  if (!reset && state.loading) return;
-  const request = ++state.request; state.loading = true;
-  $('load-more').disabled = true;
+  if (!reset && (state.loading || !state.cursor)) return;
+  const request = ++state.request; state.loading = true; state.loadError = false;
+  renderLoadState();
   if (reset) { dayPhotos.clear(); state.photos = []; state.cursor = ''; render(); loadTimeline(); }
   const params = new URLSearchParams({ q: state.query, favorite: String(state.favorite) });
   if (state.cursor) params.set('cursor', state.cursor);
   if (state.period) { const range = periodRange(state.period); params.set('from', range.from); params.set('until', range.until); }
   try {
     const data = await api(`/api/v1/photos?${params}`); if (request !== state.request) return;
-    state.photos.push(...data.photos); state.cursor = data.nextCursor; render();
-  } catch (error) { if (request === state.request) status(error.message, true); }
-  finally { if (request === state.request) { state.loading = false; $('load-more').disabled = false; $('empty').hidden = state.photos.length !== 0; } }
+    const from = state.photos.length; state.photos.push(...data.photos); state.cursor = data.nextCursor || ''; render(from);
+  } catch (error) { if (request === state.request) { state.loadError = true; status(error.message, true); } }
+  finally { if (request === state.request) { state.loading = false; renderLoadState(); $('empty').hidden = state.photos.length !== 0 || state.loadError; scheduleAutoLoad(); } }
 }
-$('load-more').addEventListener('click', () => load());
+$('retry-load').addEventListener('click', () => { status(''); load(!state.cursor); });
+function renderLoadState() {
+  $('gallery').setAttribute('aria-busy', String(state.loading));
+  $('load-indicator').textContent = state.photos.length ? 'Loading more…' : 'Loading…';
+  $('load-indicator').hidden = !state.loading;
+  $('retry-load').hidden = !state.loadError;
+}
+function scheduleAutoLoad() {
+  cancelAnimationFrame(autoLoadFrame);
+  autoLoadFrame = requestAnimationFrame(maybeLoadMore);
+}
+function maybeLoadMore() {
+  if (!state.cursor || state.loading || state.loadError || selectionBusy() || state.view !== 'photos' ||
+      $('app').hidden || $('viewer').open || $('help').open || document.visibilityState !== 'visible') return;
+  const bounds = $('load-sentinel').getBoundingClientRect();
+  if (bounds.top <= innerHeight + 400 && bounds.bottom >= 0) load();
+}
+const pageObserver = new IntersectionObserver(entries => {
+  if (entries.some(entry => entry.isIntersecting)) scheduleAutoLoad();
+}, { rootMargin: '400px 0px' });
+pageObserver.observe($('load-sentinel'));
+window.addEventListener('resize', scheduleAutoLoad);
+document.addEventListener('visibilitychange', scheduleAutoLoad);
+$('viewer').addEventListener('close', scheduleAutoLoad);
+$('help').addEventListener('close', scheduleAutoLoad);
 
-function render() {
-  const gallery = $('gallery'); gallery.replaceChildren();
+function render(from = 0) {
+  const gallery = $('gallery'); if (!from) gallery.replaceChildren();
   const groups = new Map();
-  state.photos.forEach((photo, index) => {
+  state.photos.slice(from).forEach((photo, offset) => {
+    const index = from + offset;
     const date = dateFormat.format(new Date(photo.addedAt));
     if (!groups.has(date)) groups.set(date, []); groups.get(date).push({ photo, index });
   });
   for (const [date, items] of groups) {
-    const section = document.createElement('section'); section.className = 'date-group';
-    const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = friendlyDate(items[0].photo.addedAt);
-    const dayLabel = document.createElement('label'); dayLabel.className = 'day-selection';
-    const dayCheck = document.createElement('input'); dayCheck.type = 'checkbox'; dayCheck.className = 'day-checkbox'; dayCheck.dataset.date = date;
-    dayCheck.setAttribute('aria-label', `Select all photos from ${friendlyDate(items[0].photo.addedAt)}`);
-    dayCheck.addEventListener('change', () => selectDay(date, items[0].photo.addedAt, dayCheck.checked));
-    dayLabel.append(dayCheck); heading.prepend(dayLabel);
-    const grid = document.createElement('div'); grid.className = 'photo-grid'; section.append(heading, grid);
+    let section = from ? [...gallery.children].find(node => node.dataset.date === date) : null;
+    if (!section) {
+      section = document.createElement('section'); section.className = 'date-group'; section.dataset.date = date;
+      const heading = document.createElement('h2'); heading.className = 'date-heading'; heading.textContent = friendlyDate(items[0].photo.addedAt);
+      const dayLabel = document.createElement('label'); dayLabel.className = 'day-selection';
+      const dayCheck = document.createElement('input'); dayCheck.type = 'checkbox'; dayCheck.className = 'day-checkbox'; dayCheck.dataset.date = date;
+      dayCheck.setAttribute('aria-label', `Select all photos from ${friendlyDate(items[0].photo.addedAt)}`);
+      dayCheck.addEventListener('change', () => selectDay(date, items[0].photo.addedAt, dayCheck.checked));
+      dayLabel.append(dayCheck); heading.prepend(dayLabel);
+      const grid = document.createElement('div'); grid.className = 'photo-grid'; section.append(heading, grid);
+      gallery.append(section);
+    }
+    const grid = section.querySelector('.photo-grid');
     for (const { photo, index } of items) {
       const card = document.createElement('article'); card.className = 'photo'; card.dataset.photoId = photo.id;
       const open = document.createElement('button'); open.className = 'photo-open'; open.setAttribute('aria-label', `Open ${photo.name}`);
@@ -83,10 +113,9 @@ function render() {
       const favorite = document.createElement('button'); favorite.className = `photo-fav${photo.favorite ? ' saved' : ''}`; favorite.textContent = photo.favorite ? '♥' : '♡'; favorite.setAttribute('aria-label', photo.favorite ? 'Remove from favorites' : 'Add to favorites'); favorite.setAttribute('aria-pressed', String(photo.favorite)); favorite.addEventListener('click', () => toggleFavorite(photo));
       const name = document.createElement('span'); name.className = 'photo-name'; name.textContent = photo.name; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'photo-checkbox'; checkbox.dataset.photoId = photo.id; checkbox.setAttribute('aria-label', `Select ${photo.name}`); checkbox.addEventListener('change', () => selectPhoto(photo.id, checkbox.checked)); card.append(open, checkbox, favorite, name); grid.append(card);
     }
-    gallery.append(section);
   }
   $('page-title').textContent = `${state.favorite ? 'Favorites' : 'All photos'}${state.period ? ' / ' + state.period : ''}`;
-  $('load-more').hidden = !state.cursor; $('empty').hidden = state.photos.length !== 0 || state.loading;
+  $('empty').hidden = state.photos.length !== 0 || state.loading;
   $('empty-title').textContent = state.query ? 'No matching photos.' : state.favorite ? 'No favorites yet.' : state.period ? 'No photos in this period.' : 'No photos yet.';
   $('empty-text').textContent = state.query ? 'Try a different filename.' : state.favorite ? 'Use the heart on a photo or video to save it here.' : state.period ? 'Choose another date or select all.' : 'Upload photos or videos to get started.';
   $('empty-upload').hidden = state.favorite || !!state.query;
@@ -280,6 +309,7 @@ async function loadTimeline() {
 }
 
 function renderSelection() {
+  scheduleAutoLoad();
   $('photo-panel').classList.toggle('selecting', state.selecting);
   $('selection-bar').hidden = !state.selecting;
   $('selection-count').textContent = state.selectingAll ? 'Selecting…' : `${state.selection.size} selected`;

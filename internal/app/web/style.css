@@ -63,7 +63,7 @@ a:hover { text-decoration: underline; }
 .empty { text-align: center; padding: 80px 10px; }
 .empty h2 { margin: 0; font-size: 20px; font-weight: 550; }
 .empty p { margin: 10px 0 20px; color: var(--muted); }
-.load-more { text-align: center; margin: 24px 0; }
+.load-more { overflow-anchor: none; min-height: 24px; text-align: center; margin: 24px 0; color: var(--muted); }
 .status { border-left: 2px solid var(--accent); padding: 10px 14px; margin: 0 0 20px; font-size: 13px; background: var(--surface); white-space: pre-line; overflow-wrap: anywhere; }
 .error, .danger { color: var(--error); }
 .error:empty { display: none; }

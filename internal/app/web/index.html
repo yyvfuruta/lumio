@@ -19,7 +19,7 @@
 <h1 class="sr-only" id="page-title">Photos</h1>
 <div id="status" class="status" role="status" aria-live="polite" hidden></div><div id="photo-panel"><aside id="timeline" class="timeline" aria-label="Browse uploads by date"></aside><div class="photo-content"><div id="selection-bar" class="selection-toolbar" hidden><span id="selection-count" aria-live="polite">0 selected</span><button id="select-shown">Select all</button><button id="clear-selection">Clear selection</button><button id="cancel-selection">Cancel</button><button id="download-selected" disabled>Download selected photos</button><button id="delete-selected" class="danger" disabled>Delete selected</button></div><section id="gallery" aria-label="Photos"></section>
 <section id="empty" class="empty" hidden><h2 id="empty-title">No photos yet.</h2><p id="empty-text">Upload photos or videos to get started.</p><button id="empty-upload">Upload photos or videos</button></section>
-<div class="load-more"><button id="load-more" hidden>Older photos</button></div></div></div>
+<div id="load-sentinel" class="load-more" role="status" aria-live="polite"><span id="load-indicator" hidden>Loading…</span><button id="retry-load" hidden>Try again</button></div></div></div>
 <section id="status-panel" class="status-panel" aria-labelledby="status-title" hidden>
 <div class="panel-heading"><h2 id="status-title">Status</h2><button id="refresh-status">Refresh</button></div>
 <p id="status-error" class="error" role="alert"></p>
