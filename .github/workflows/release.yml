@@ -16,6 +16,9 @@ concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+env:
+  GOFLAGS: -trimpath
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -30,15 +33,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
       - name: Validate release tag
-        id: release
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$RELEASE_TAG" = "v$(cat VERSION)"
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
-          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Test
         run: |
           go test -race ./...
@@ -49,6 +51,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare container from release binaries
+        run: python3 .github/scripts/prepare-container.py
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -65,13 +69,11 @@ jobs:
       - name: Build and publish multi-platform image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./dist/container
+          file: .github/docker/Dockerfile.release
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ inputs.tag || github.ref_name }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ inputs.tag || github.ref_name }}
-            COMMIT=${{ steps.release.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

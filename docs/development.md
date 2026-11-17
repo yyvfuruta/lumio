@@ -10,6 +10,8 @@ Integration tests create isolated PostgreSQL schemas and bucket prefixes. Set `L
 
 GoReleaser creates Linux/macOS/Windows binaries for amd64 and arm64, archives, checksums, and release notes. The release workflow also publishes a Linux amd64/arm64 image to `ghcr.io/yyvfuruta/lumio:<tag>`.
 
+Release images reuse the Linux binaries built by GoReleaser; the container packaging step does not compile Go again. CI and releases use `-trimpath` consistently so their native Go compilation caches are compatible. The regular Dockerfile still builds from source for local development. New pushes cancel older CI runs for the same branch, while release runs finish independently.
+
 ```sh
 make release-check
 ```
