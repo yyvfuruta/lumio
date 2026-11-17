@@ -20,6 +20,8 @@ archives:
         formats: [zip]
     files:
       - README.md
+      - LICENSE
+      - docs/**
       - deploy/k8s/**
 
 checksum:

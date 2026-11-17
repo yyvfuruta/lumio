@@ -20,8 +20,8 @@ To publish a release, update `VERSION` to the target version, commit the change,
 
 ```sh
 git push origin main
-git tag -a v0.1.0 -m 'Release v0.1.0'
-git push origin v0.1.0
+git tag -a v0.0.1 -m 'Release v0.0.1'
+git push origin v0.0.1
 ```
 
 Releases must update `VERSION` to match their `vMAJOR.MINOR.PATCH` tag. Never move an existing tag. GitHub Actions needs repository contents/package write permissions; make the GHCR package accessible to your cluster or configure an image pull Secret. A manual Release workflow run can target an existing tag if publication needs to be retried.
