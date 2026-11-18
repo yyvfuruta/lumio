@@ -27,7 +27,7 @@ flowchart LR
 | `internal/app` | Composition, environment configuration, and worker lifecycle |
 | `cmd/lumio-cli` | Separate client executable; no backend/codec dependencies |
 | `internal/cli` | Remote client, local session persistence, output formatting, and streaming file transfer; standard library only |
-| `android` | Shared web library in an origin-restricted WebView, native file picker/downloads, upload queue, session storage, and HTTP transport |
+| `android` | Native gallery/viewer and library state, Android file picker/downloads, upload queue, encrypted session storage, and API transport; no WebView |
 
 Interfaces belong to their consumer (`core`), not their implementation. Neither
 HTTP types, SQL, pgx, cloud bucket types, nor codec libraries enter the core.

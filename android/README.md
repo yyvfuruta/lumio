@@ -1,10 +1,9 @@
 # Lumio for Android
 
-An Android client for Android 8.0+ (API 26). Its **Biblioteca** tab displays the
-server's actual responsive web frontend in a WebView, keeping the same gallery,
-upload-date timeline, search, favorites, light/dark/system themes, photo viewer,
-video player, selection, deletion, and library status as the browser. The
-**Envios** tab retains the native uploader and its persistent pending queue.
+A native Java client for Android 8.0+ (API 26), using Android views and the Lumio
+HTTP API. The library follows the web frontend's layout and colors, with a photo
+grid grouped by upload date, a date timeline, search, favorites, selection, and
+light/dark/system appearance. No WebView, HTML, or JavaScript is used in the app.
 There are no third-party runtime dependencies.
 
 ## Install and use
@@ -17,52 +16,52 @@ installation for the app you use to open the file. Alternatively:
 adb install -r dist/lumio-android.apk
 ```
 
-1. Enter your Lumio URL, for example `https://photos.example.com`, and password.
-2. After signing in, the app opens **Biblioteca**, using the same interface as the web.
-3. Browse your photos/videos, search, use the date timeline or favorites, and tap
-   a thumbnail to open its viewer. The library menu includes appearance and status.
-4. Tap the web interface's upload button to select photos/videos with Android's
-   system picker. Originals and selection ZIPs open Android's Save dialog.
-5. Use **Envios** for the native upload queue/retries, or the app's ⋮ menu to
-   refresh the library or configure another server.
+1. Enter the Lumio URL, for example `https://photos.example.com`, and password.
+2. After signing in, **Biblioteca** opens a native gallery. The menu provides
+   photos, favorites, library/storage status, appearance, refresh, and sign out.
+3. Search by filename or use the year/month timeline. More files load as you scroll.
+4. Tap a photo to open the native viewer; pinch/double-tap to zoom. Videos use
+   Android VideoView and native playback controls. The viewer's actions include
+   favorites, original downloads, and confirmed deletion.
+5. Use the checkboxes or a long press to select files. Select an entire day or
+   all matching files (up to 1000), download a ZIP, or delete with confirmation.
+6. Tap Upload to select photos/videos with Android's system picker and send
+   them. **Envios** also provides the persistent queue and per-file retry results.
 
-The Android Back button closes the viewer, menus, or selection before leaving
-the library. Video fullscreen is supported. Rotation keeps the WebView and active
-file picker intact. Errors opening the server show Retry and server settings.
-The native chrome follows the library's theme. The phone stays awake during
-uploads; keep the app open until they finish. There are no automatic background
-backups or offline gallery. Update Android System WebView for current web support.
+Android Back closes the viewer/selection or returns from status before leaving
+the library. Rotation resizes the native grid without cancelling the active
+picker. Themes also update Android's system bars. Keep the app open while sending
+files; the screen stays awake during transfers. There is no automatic background
+backup or offline library.
 
-The web interface is loaded directly from your configured server, so frontend
-updates reach Android without shipping a second copy of its HTML/CSS/JS in the
-APK. The interface therefore matches the version running on your server.
+The app and web frontend share the API, not rendering code. Native rows recycle
+as you scroll; thumbnails use a bounded bitmap cache. Image previews are sampled
+to at most 2048 pixels per edge before display and honor JPEG EXIF orientation.
+GIFs display their first frame. Video playback depends on Android codec support;
+unsupported media can still be downloaded as unchanged originals.
 
-Native uploads preserve their pending selection with persistent read permissions.
-After process termination, reopen **Envios** and retry. Successful files leave
-the queue, failures remain, and uncertain retries are deduplicated by the server.
-The library refreshes after native uploads. Uploads started in the web interface
-use its existing per-file validation/retry flow and do not enter the native queue.
-The server's format and upload limits apply to both flows (32 MiB by default).
+Uploads preserve the pending selection with persistent read permissions. After
+process termination, reopen **Envios** and retry. Completed files leave the queue,
+failures remain, and uncertain retries are deduplicated by the server. The gallery
+refreshes after uploads. The server's format/size limits apply (32 MiB by default).
+Timeline bounds and date groups use the device timezone, including DST changes.
 
-Downloads stream originals and ZIPs to a destination selected with Android's
-Storage Access Framework. They reuse the library's session, reject redirects and
-foreign origins, verify declared response lengths, and remove partial documents
-when the provider allows it. No broad storage/gallery permission is required.
+Originals and ZIPs stream to a location chosen in Android's Save dialog, without
+buffering the whole download in RAM. Requests use the native session, reject
+foreign origins and redirects, verify declared lengths, and remove partial
+documents when the chosen provider allows it. Only Internet access is requested;
+the picker grants access to chosen files without broad storage/gallery permission.
 
-Use a server address reachable from your phone. `localhost` on the phone refers
-to the phone. Compose binds port 8080 to loopback by default. For LAN testing,
-publish it on an appropriate interface with a Compose override, use the computer's
-LAN address, select **Permitir HTTP na rede local**, and set
-`LUMIO_SECURE_COOKIE=false` on that development server. Use HTTPS for normal use.
+Use an address reachable from your phone. `localhost` refers to the phone.
+Compose binds port 8080 to loopback by default. For LAN testing, publish it on an
+appropriate interface, use the computer's LAN address, select **Permitir HTTP na
+rede local**, and set `LUMIO_SECURE_COOKIE=false` on that development server.
+Use HTTPS for normal use. Certificate errors are rejected.
 
-Only Internet access is requested. HTTPS uses Android's certificate trust;
-certificate errors are rejected. The WebView is restricted to the configured
-origin, rejects mixed content, disables file-URL access, third-party cookies,
-popups, and JavaScript-to-native interfaces. Selected content URIs are supplied
-only through the system picker. An encrypted session snapshot in Android Keystore
-restores native authentication; the WebView also maintains its own cookie store
-inside the app's private storage. Browser session changes synchronize back to
-the native uploader. Passwords are not saved; app backup is disabled.
+Sessions are encrypted with an AES-GCM key in Android Keystore and bound to the
+selected server. Passwords are not saved, app backup is disabled, and media
+caches are cleared when the library/account closes. Expired sessions return to
+login. Native views do not maintain a second browser cookie store.
 
 ## Build
 
@@ -88,8 +87,9 @@ passed to the signer by environment variable. CI builds use development keys;
 those artifacts are for testing, not stable release updates.
 
 `android/test.sh` runs JVM transport tests for login, cookies, multipart streaming
-with known/unknown sizes, origin isolation, download allowlists, authenticated
-original/ZIP streaming, redirects, and interrupted transfers. Server integration tests
+with known/unknown sizes, origin isolation, media/download allowlists, authenticated
+original/ZIP streaming, redirects, interrupted transfers, and timezone/DST/leap-year
+boundaries used by the native timeline and day selections. Server integration tests
 exercise the API against PostgreSQL and local/S3 storage. These do not replace
 on-device testing of the picker, Keystore, lifecycle, or device-specific UI.
 

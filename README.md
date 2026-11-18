@@ -66,8 +66,9 @@ Stopping the services preserves their volumes. `docker compose down -v` deletes 
 The separate `lumio-cli` binary supports login, uploads, downloads, listing,
 favorites, deletion, and status. `make build` builds the server and client;
 release archives include both. Run `lumio-cli help` or see the [CLI guide](docs/cli.md).
-The [Android app](android/README.md) displays the same web library, with native
-file selection, original/ZIP downloads, and an additional pending upload queue.
+The native [Android app](android/README.md) follows the web library design, with
+a photo grid, timeline, search, favorites, native viewers, original/ZIP downloads,
+and a persistent upload queue.
 Build an installable APK with `make android-apk`.
 
 The backend separates its core use cases from PostgreSQL, object storage, and

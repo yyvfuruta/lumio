@@ -2,9 +2,9 @@ package io.github.yyvfuruta.lumio;
 
 import java.net.URI;
 
-/** Origin and credential rules shared by the WebView adapter and downloads. */
-public final class WebPolicy {
-    private WebPolicy() { }
+/** Origin and credential rules for native media requests. */
+public final class MediaPolicy {
+    private MediaPolicy() { }
     public static boolean sameOrigin(String server, String target) {
         try {
             URI a = URI.create(server), b = URI.create(target);
@@ -21,6 +21,9 @@ public final class WebPolicy {
         String path = URI.create(target).getRawPath();
         return path != null && (path.matches("/api/v1/photos/[a-f0-9]{64}/original")
                 || path.matches("/api/v1/photo-archives/[a-f0-9]{32}"));
+    }
+    public static boolean mediaAllowed(String server, String target) {
+        return sameOrigin(server, target) && URI.create(target).getRawPath().matches("/api/v1/photos/[a-f0-9]{64}/(original|preview|thumbnail)");
     }
     public static String sessionToken(String cookies) {
         if (cookies != null) for (String cookie : cookies.split(";")) {

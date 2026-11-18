@@ -1,4 +1,4 @@
-import io.github.yyvfuruta.lumio.WebPolicy;
+import io.github.yyvfuruta.lumio.MediaPolicy;
 import io.github.yyvfuruta.lumio.MediaDownload;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
@@ -10,15 +10,15 @@ public final class LibraryTest {
     public static void main(String[] args) throws Exception {
         String origin = "https://photos.example.com";
         for (String url : new String[]{origin + "/", origin + "/api/v1/photos", "https://PHOTOS.example.com:443/preview"}) {
-            if (!WebPolicy.sameOrigin(origin, url)) throw new AssertionError("same origin denied: " + url);
+            if (!MediaPolicy.sameOrigin(origin, url)) throw new AssertionError("same origin denied: " + url);
         }
         for (String url : new String[]{"http://photos.example.com/", "https://photos.example.com.evil/", "https://photos.example.com:444/", "https://user@photos.example.com/", "file:///tmp/photo", "content://photos.example.com/x", "javascript:alert(1)", "not a URL"}) {
-            if (WebPolicy.sameOrigin(origin, url)) throw new AssertionError("foreign origin accepted: " + url);
+            if (MediaPolicy.sameOrigin(origin, url)) throw new AssertionError("foreign origin accepted: " + url);
         }
         String id = "b".repeat(64), token = "a".repeat(64);
-        if (!WebPolicy.sessionToken("other=x; lumio_session=" + token + "; more=x").equals(token)) throw new AssertionError("cookie parsing");
-        if (!WebPolicy.sessionToken("lumio_session=bad\r\nCookie: injected").isEmpty()) throw new AssertionError("cookie injection");
-        if (!WebPolicy.filename("../../phone\n.jpg").equals("phone_.jpg")) throw new AssertionError("unsafe filename");
+        if (!MediaPolicy.sessionToken("other=x; lumio_session=" + token + "; more=x").equals(token)) throw new AssertionError("cookie parsing");
+        if (!MediaPolicy.sessionToken("lumio_session=bad\r\nCookie: injected").isEmpty()) throw new AssertionError("cookie injection");
+        if (!MediaPolicy.filename("../../phone\n.jpg").equals("phone_.jpg")) throw new AssertionError("unsafe filename");
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         AtomicInteger downloaded = new AtomicInteger();
         server.createContext("/api/v1/photos/" + id + "/original", exchange -> {

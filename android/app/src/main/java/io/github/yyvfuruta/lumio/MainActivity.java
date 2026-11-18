@@ -1,13 +1,6 @@
 package io.github.yyvfuruta.lumio;
 
 import android.app.Activity;
-import android.webkit.CookieManager;
-import android.webkit.ValueCallback;
-import android.webkit.URLUtil;
-import android.widget.FrameLayout;
-import android.widget.Toast;
-import android.widget.PopupMenu;
-import java.util.ArrayList;
 import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Color;
@@ -19,6 +12,8 @@ import android.text.InputType;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.Toast;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -27,24 +22,22 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class MainActivity extends Activity implements UploadModel.Observer {
-    private static final int PICK_MEDIA = 10, PICK_WEB_MEDIA = 11, SAVE_DOWNLOAD = 12;
+    private static final int PICK_MEDIA = 10, SAVE_DOWNLOAD = 12;
     private static final int INK = 0xff171717, TEAL = 0xff444444, MUTED = 0xff777777;
     private UploadModel model;
     private EditText url, password;
     private CheckBox allowHTTP;
     private Button login, logout, select, upload, clear;
     private TextView status, queue, detail;
-    private ProgressBar progress, pageProgress;
-    private LibraryBrowser browser;
-    private FrameLayout panels, browserPanel;
+    private ProgressBar progress;
+    private FrameLayout panels;
     private View uploadPanel;
-    private LinearLayout browserError;
-    private TextView browserErrorText, transferStatus;
-    private Button libraryTab, uploadsTab, menu;
-    private LinearLayout shell, toolbar;
-    private boolean galleryVisible, previousSignedIn, previousBusy, dirtyLibrary;
+    private LinearLayout shell, tabs;
+    private GalleryView gallery;
+    private Button libraryTab, uploadsTab;
+    private TextView transferStatus;
+    private boolean galleryVisible, previousSignedIn, previousBusy, uploadFromLibrary;
     private int loginRevision, libraryRevision;
-    private ValueCallback<Uri[]> fileCallback;
     private String downloadURL, downloadServer;
 
 
@@ -56,43 +49,21 @@ public final class MainActivity extends Activity implements UploadModel.Observer
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         LinearLayout page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(24), dp(36), dp(24), dp(28));
-        scroll.addView(page);
-        uploadPanel = scroll;
+        scroll.addView(page); uploadPanel = scroll;
         shell = new LinearLayout(this); shell.setOrientation(LinearLayout.VERTICAL);
-        toolbar = new LinearLayout(this); toolbar.setPadding(dp(8), 0, dp(8), 0);
-        libraryTab = new Button(this); libraryTab.setText("Biblioteca"); libraryTab.setAllCaps(false);
-        libraryTab.setOnClickListener(v -> showLibrary());
-        uploadsTab = new Button(this); uploadsTab.setText("Envios"); uploadsTab.setAllCaps(false);
-        uploadsTab.setOnClickListener(v -> showUploads());
-        toolbar.addView(libraryTab, new LinearLayout.LayoutParams(0, dp(48), 1));
-        toolbar.addView(uploadsTab, new LinearLayout.LayoutParams(0, dp(48), 1));
-        menu = new Button(this); menu.setText("⋮"); menu.setContentDescription("Opções do aplicativo");
-        toolbar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        menu.setOnClickListener(v -> {
-            PopupMenu popup = new PopupMenu(this, menu);
-            popup.getMenu().add("Atualizar biblioteca").setOnMenuItemClickListener(item -> { if (browser != null) browser.reload(); return true; });
-            popup.getMenu().add("Configurar servidor").setOnMenuItemClickListener(item -> { showUploads(); scroll.smoothScrollTo(0, 0); return true; });
-            popup.show();
-        });
-        shell.addView(toolbar);
-        pageProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); pageProgress.setIndeterminate(true);
-        pageProgress.setVisibility(View.GONE); shell.addView(pageProgress, new LinearLayout.LayoutParams(-1, dp(3)));
         panels = new FrameLayout(this); shell.addView(panels, new LinearLayout.LayoutParams(-1, 0, 1));
         panels.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
-        browserPanel = new FrameLayout(this); panels.addView(browserPanel, new FrameLayout.LayoutParams(-1, -1));
-        browserPanel.setVisibility(View.GONE);
-        transferStatus = text("", 13, INK); transferStatus.setPadding(dp(16), dp(8), dp(16), dp(8));
-        transferStatus.setVisibility(View.GONE); shell.addView(transferStatus);
+        transferStatus = text("", 13, INK); transferStatus.setPadding(dp(16), dp(8), dp(16), dp(8)); transferStatus.setVisibility(View.GONE); shell.addView(transferStatus);
+        tabs = new LinearLayout(this);
+        libraryTab = new Button(this); libraryTab.setText("Biblioteca"); libraryTab.setAllCaps(false); libraryTab.setOnClickListener(v -> showLibrary());
+        uploadsTab = new Button(this); uploadsTab.setText("Envios"); uploadsTab.setAllCaps(false); uploadsTab.setOnClickListener(v -> showUploads());
+        tabs.addView(libraryTab, new LinearLayout.LayoutParams(0, dp(48), 1)); tabs.addView(uploadsTab, new LinearLayout.LayoutParams(0, dp(48), 1)); shell.addView(tabs);
         setContentView(shell);
-        shell.setOnApplyWindowInsetsListener((v, insets) -> {
-            shell.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets;
-        });
-        loginRevision = model.loginRevision; libraryRevision = model.libraryRevision;
-
-        scroll.requestApplyInsets();
+        shell.setOnApplyWindowInsetsListener((v, insets) -> { shell.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
+        shell.requestApplyInsets(); loginRevision = model.loginRevision; libraryRevision = model.libraryRevision;
         TextView brand = text("LUMIO", 14, TEAL); brand.setLetterSpacing(.2f); brand.setTypeface(null, Typeface.BOLD); page.addView(brand);
         TextView title = text("Sua biblioteca de fotos.", 28, INK); title.setTypeface(null, Typeface.BOLD); add(page, title, 12);
-        add(page, text("Conecte seu servidor para abrir a biblioteca. Você também pode gerenciar os envios deste celular aqui.", 16, MUTED), 12);
+        add(page, text("Conecte seu servidor para abrir a biblioteca. Gerencie os envios deste celular aqui.", 16, MUTED), 12);
 
         LinearLayout connection = card(page, 28);
         add(connection, text("01  /  CONECTAR", 13, TEAL), 0);
@@ -114,27 +85,20 @@ public final class MainActivity extends Activity implements UploadModel.Observer
                 password.setText(""); model.login(endpoint, secret);
             } catch (IllegalArgumentException e) { url.setError(e.getMessage()); }
         });
-        logout = button("Sair da conta", connection, v -> { closeBrowser(); CookieManager.getInstance().removeAllCookies(null); model.logout(); });
+        logout = button("Sair da conta", connection, v -> model.logout());
 
         LinearLayout files = card(page, 18);
         add(files, text("02  /  ENVIAR", 13, TEAL), 0);
         queue = text("", 22, INK); queue.setTypeface(null, Typeface.BOLD); add(files, queue, 14);
         add(files, text("Selecione apenas os arquivos que deseja enviar. Fotos duplicadas não são armazenadas novamente.", 14, MUTED), 8);
-        select = button("Selecionar fotos e vídeos", files, v -> {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("*/*");
-            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            startActivityForResult(intent, PICK_MEDIA);
-        });
+        select = button("Selecionar fotos e vídeos", files, v -> pickFiles(false));
         upload = button("Enviar para o Lumio", files, v -> model.upload());
         clear = button("Limpar seleção", files, v -> model.clearQueue());
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); progress.setMax(100); add(files, progress, 16);
         status = text("", 15, INK); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); add(files, status, 12);
         detail = text("", 13, MUTED); detail.setTextIsSelectable(true); add(files, detail, 12);
         add(page, text("Mantenha o aplicativo aberto durante o envio. Se ele for encerrado, a seleção pendente fica salva para tentar novamente. O limite e os formatos aceitos são definidos pelo servidor.", 12, MUTED), 22);
-        if (state != null) { downloadURL = state.getString("download-url"); downloadServer = state.getString("download-server"); }
+        if (state != null) { downloadURL = state.getString("download-url"); downloadServer = state.getString("download-server"); uploadFromLibrary = state.getBoolean("upload-library"); }
         changed();
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
@@ -156,15 +120,13 @@ public final class MainActivity extends Activity implements UploadModel.Observer
         runOnUiThread(() -> {
             if (isFinishing() || isDestroyed()) return;
             boolean idle = !model.busy;
-            if (model.libraryRevision != libraryRevision) { libraryRevision = model.libraryRevision; dirtyLibrary = true; }
-            if (model.signedIn && (!previousSignedIn || loginRevision != model.loginRevision)) {
-                loginRevision = model.loginRevision; showLibrary();
-            } else if (!model.signedIn && previousSignedIn) { closeBrowser(); showUploads(); }
+            if (model.signedIn && (!previousSignedIn || loginRevision != model.loginRevision)) { loginRevision = model.loginRevision; closeGallery(); showLibrary(); }
+            else if (!model.signedIn && previousSignedIn) { closeGallery(); showUploads(); }
             previousSignedIn = model.signedIn;
-            libraryTab.setEnabled(model.signedIn);
-            uploadsTab.setText(model.count() > 0 ? "Envios (" + model.count() + ")" : "Envios");
-            transferStatus.setVisibility(galleryVisible && model.busy ? View.VISIBLE : View.GONE);
-            transferStatus.setText(model.message);
+            if (model.libraryRevision != libraryRevision) { libraryRevision = model.libraryRevision; if (gallery != null) gallery.refresh(); }
+            libraryTab.setEnabled(model.signedIn); uploadsTab.setText(model.count() > 0 ? "Envios (" + model.count() + ")" : "Envios");
+            if (gallery != null) gallery.transfers(model.busy);
+            transferStatus.setText(model.message); transferStatus.setVisibility(galleryVisible && model.busy ? View.VISIBLE : View.GONE);
             if (previousBusy && !model.busy && galleryVisible) Toast.makeText(this, model.message, Toast.LENGTH_LONG).show();
             previousBusy = model.busy;
             login.setEnabled(idle); url.setEnabled(idle); password.setEnabled(idle); allowHTTP.setEnabled(idle);
@@ -181,30 +143,17 @@ public final class MainActivity extends Activity implements UploadModel.Observer
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == SAVE_DOWNLOAD) {
-            if (result == RESULT_OK && data != null && data.getData() != null && downloadURL != null
-                    && downloadServer.equals(model.endpoint())) {
-                String cookies = CookieManager.getInstance().getCookie(downloadServer);
-                if (WebPolicy.sessionToken(cookies).isEmpty() && model.signedIn) cookies = "lumio_session=" + model.sessionToken();
-                model.download(downloadServer, downloadURL, cookies, data.getData());
+            if (result == RESULT_OK && data != null && data.getData() != null && downloadURL != null && downloadServer.equals(model.endpoint())) {
+                model.download(downloadServer, downloadURL, "lumio_session=" + model.sessionToken(), data.getData());
             }
             downloadURL = null; downloadServer = null; return;
         }
-        if (request == PICK_WEB_MEDIA) {
-            ValueCallback<Uri[]> callback = fileCallback; fileCallback = null;
-            if (callback == null) return;
-            ArrayList<Uri> files = new ArrayList<>();
-            if (result == RESULT_OK && data != null) {
-                ClipData clips = data.getClipData();
-                if (clips != null) for (int i = 0; i < clips.getItemCount(); i++) acceptWebUri(files, clips.getItemAt(i).getUri());
-                else if (data.getData() != null) acceptWebUri(files, data.getData());
-            }
-            callback.onReceiveValue(files.isEmpty() ? null : files.toArray(new Uri[0])); return;
-        }
-        if (request != PICK_MEDIA || result != RESULT_OK || data == null) return;
+        if (request != PICK_MEDIA || result != RESULT_OK || data == null) { uploadFromLibrary = false; return; }
         ClipData clips = data.getClipData();
         if (clips != null) for (int i = 0; i < clips.getItemCount(); i++) addUri(clips.getItemAt(i).getUri());
         else if (data.getData() != null) addUri(data.getData());
-        model.message = "Seleção pronta. Toque em Enviar para o Lumio."; changed();
+        model.message = "Seleção pronta. Toque em Enviar para o Lumio.";
+        if (uploadFromLibrary) model.upload(); uploadFromLibrary = false; changed();
     }
     private void addUri(Uri uri) {
         if (!"content".equals(uri.getScheme())) return;
@@ -212,93 +161,59 @@ public final class MainActivity extends Activity implements UploadModel.Observer
         catch (SecurityException e) { model.message = "O provedor não permite manter acesso a este arquivo."; return; }
         model.add(uri);
     }
-    private void acceptWebUri(ArrayList<Uri> files, Uri uri) {
-        if (uri != null && "content".equals(uri.getScheme()) && !files.contains(uri)) files.add(uri);
-    }
-    private void showUploads() {
-        if (browser != null) { browser.syncSession(); browser.visible(false); }
-        galleryVisible = false; applyChromeTheme("#ffffff", "#171717"); uploadPanel.setVisibility(View.VISIBLE); browserPanel.setVisibility(View.GONE);
-        pageProgress.setVisibility(View.GONE); transferStatus.setVisibility(View.GONE);
+    private void pickFiles(boolean send) {
+        if (model.busy) return; uploadFromLibrary = send;
+        Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+        choose.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"}); choose.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        choose.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try { startActivityForResult(choose, PICK_MEDIA); }
+        catch (android.content.ActivityNotFoundException e) { Toast.makeText(this, "Nenhum seletor de arquivos disponível.", Toast.LENGTH_LONG).show(); }
     }
     private void showLibrary() {
         if (!model.signedIn) { showUploads(); return; }
-        if (browser == null) {
-            browser = new LibraryBrowser(this, new LibraryBrowser.Host() {
-                @Override public void loading(boolean loading) {
-                    browserError.setVisibility(View.GONE);
-                    pageProgress.setVisibility(loading && galleryVisible ? View.VISIBLE : View.GONE);
-                }
-                @Override public void failed(String message) {
-                    pageProgress.setVisibility(View.GONE); browserErrorText.setText(message); browserError.setVisibility(View.VISIBLE);
-                }
-                @Override public void chooseFiles(ValueCallback<Uri[]> callback, boolean multiple) {
-                    if (fileCallback != null) fileCallback.onReceiveValue(null);
-                    fileCallback = callback;
-                    Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
-                    choose.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
-                    choose.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
-                    choose.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    try { startActivityForResult(choose, PICK_WEB_MEDIA); }
-                    catch (android.content.ActivityNotFoundException e) { fileCallback = null; callback.onReceiveValue(null); Toast.makeText(MainActivity.this, "Nenhum seletor de arquivos disponível.", Toast.LENGTH_LONG).show(); }
-                }
-                @Override public void download(String target, String disposition, String mime) {
+        if (gallery == null) {
+            gallery = new GalleryView(this, model, new GalleryView.Host() {
+                @Override public void upload() { pickFiles(true); }
+                @Override public void download(String target, String name, String mime) {
                     if (model.busy || downloadURL != null) { Toast.makeText(MainActivity.this, "Aguarde a operação atual terminar.", Toast.LENGTH_SHORT).show(); return; }
+                    if (!MediaPolicy.downloadAllowed(model.endpoint(), target)) return;
                     downloadURL = target; downloadServer = model.endpoint();
-                    Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                            .setType(mime == null || mime.isEmpty() ? "application/octet-stream" : mime)
-                            .putExtra(Intent.EXTRA_TITLE, WebPolicy.filename(URLUtil.guessFileName(target, disposition, mime)));
+                    Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, MediaPolicy.filename(name));
                     try { startActivityForResult(save, SAVE_DOWNLOAD); }
                     catch (android.content.ActivityNotFoundException e) { downloadURL = null; downloadServer = null; Toast.makeText(MainActivity.this, "Nenhum local de salvamento disponível.", Toast.LENGTH_LONG).show(); }
                 }
-                @Override public void session(String server, String cookies) { model.adoptBrowserSession(server, cookies); }
-                @Override public void theme(String background, String foreground) { if (galleryVisible) applyChromeTheme(background, foreground); }
+                @Override public void logout() { if (!model.busy) model.logout(); }
+                @Override public void expired() { model.invalidateSession(); }
+                @Override public void theme(GalleryTheme theme) { applyChromeTheme(theme); }
             });
-            browserPanel.addView(browser.view, new FrameLayout.LayoutParams(-1, -1));
-            browserError = new LinearLayout(this); browserError.setOrientation(LinearLayout.VERTICAL);
-            browserError.setPadding(dp(24), dp(40), dp(24), dp(24)); browserError.setBackgroundColor(0xfff8f8f8);
-            browserErrorText = text("", 18, INK); browserError.addView(browserErrorText);
-            button("Tentar novamente", browserError, v -> { browserError.setVisibility(View.GONE); browser.reload(); });
-            button("Configurar servidor", browserError, v -> showUploads());
-            browserError.setVisibility(View.GONE); browserPanel.addView(browserError, new FrameLayout.LayoutParams(-1, -1));
+            panels.addView(gallery, new FrameLayout.LayoutParams(-1, -1));
         }
-        galleryVisible = true; uploadPanel.setVisibility(View.GONE); browserPanel.setVisibility(View.VISIBLE);
-        browser.visible(true); browser.show(model.endpoint(), model.sessionToken());
-        if (dirtyLibrary && !model.busy) { browser.reload(); dirtyLibrary = false; }
+        galleryVisible = true; uploadPanel.setVisibility(View.GONE); gallery.setVisibility(View.VISIBLE); gallery.shown();
+        transferStatus.setVisibility(model.busy ? View.VISIBLE : View.GONE);
     }
-    private void applyChromeTheme(String background, String foreground) {
-        try {
-            int bg = Color.parseColor(background), fg = Color.parseColor(foreground);
-            shell.setBackgroundColor(bg); toolbar.setBackgroundColor(bg); transferStatus.setTextColor(fg);
-            for (Button b : new Button[]{libraryTab, uploadsTab, menu}) { b.setTextColor(fg); b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(bg)); }
-            getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
-            boolean light = Color.red(bg) + Color.green(bg) + Color.blue(bg) > 384;
-            int flags = getWindow().getDecorView().getSystemUiVisibility();
-            int bars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-            getWindow().getDecorView().setSystemUiVisibility(light ? flags | bars : flags & ~bars);
-        } catch (IllegalArgumentException ignored) { }
+    private void showUploads() {
+        galleryVisible = false; if (gallery != null) { gallery.pause(); gallery.setVisibility(View.GONE); }
+        uploadPanel.setVisibility(View.VISIBLE); transferStatus.setVisibility(View.GONE); applyChromeTheme(new GalleryTheme(this, "light"));
     }
-    private void closeBrowser() {
-        if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
-        if (browser != null) { browser.destroy(); browser = null; browserPanel.removeAllViews(); }
+    private void applyChromeTheme(GalleryTheme theme) {
+        shell.setBackgroundColor(theme.background); tabs.setBackgroundColor(theme.background); transferStatus.setTextColor(theme.text);
+        for (Button b : new Button[]{libraryTab, uploadsTab}) { b.setTextColor(theme.text); b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(theme.background)); }
+        getWindow().setStatusBarColor(theme.background); getWindow().setNavigationBarColor(theme.background);
+        int flags = getWindow().getDecorView().getSystemUiVisibility(), bars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(theme.dark ? flags & ~bars : flags | bars);
     }
+    private void closeGallery() { if (gallery != null) { gallery.close(); panels.removeView(gallery); gallery = null; } }
     @Override protected void onSaveInstanceState(Bundle state) {
-        super.onSaveInstanceState(state); state.putString("download-url", downloadURL); state.putString("download-server", downloadServer);
+        super.onSaveInstanceState(state); state.putString("download-url", downloadURL); state.putString("download-server", downloadServer); state.putBoolean("upload-library", uploadFromLibrary);
     }
-    @Override protected void onStop() {
-        if (browser != null) { browser.syncSession(); browser.visible(false); }
-        super.onStop();
-    }
-    @Override protected void onStart() {
-        super.onStart(); if (browser != null && galleryVisible) browser.visible(true);
-    }
+    @Override protected void onStop() { if (gallery != null) gallery.pause(); super.onStop(); }
     @Override public void onBackPressed() {
-        if (galleryVisible && browser != null) browser.back(() -> MainActivity.super.onBackPressed());
-        else if (model.signedIn) showLibrary(); else super.onBackPressed();
+        if (galleryVisible && gallery != null && gallery.back()) return;
+        if (!galleryVisible && model.signedIn) showLibrary(); else super.onBackPressed();
     }
     @Override public Object onRetainNonConfigurationInstance() { return model; }
     @Override protected void onDestroy() {
-        if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
-        closeBrowser(); model.observer = null;
+        closeGallery(); model.observer = null;
         if (!isChangingConfigurations()) model.worker.shutdown();
         super.onDestroy();
     }

@@ -5,11 +5,11 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
-import android.provider.DocumentsContract;
-import java.io.OutputStream;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.InputStream;
+import java.io.OutputStream;
+import android.provider.DocumentsContract;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -30,8 +30,7 @@ final class UploadModel {
     volatile String detail = "";
     volatile int progress;
     volatile long maxBytes = 32L << 20;
-    volatile int libraryRevision;
-    volatile int loginRevision;
+    volatile int libraryRevision, loginRevision;
     private volatile String base;
     private volatile String token;
 
@@ -162,23 +161,7 @@ final class UploadModel {
     }
     String endpoint() { return base; }
     String sessionToken() { return token; }
-    void adoptBrowserSession(String endpoint, String cookies) {
-        if (busy || !endpoint.equals(base) || worker.isShutdown()) return;
-        String fresh = WebPolicy.sessionToken(cookies);
-        if (fresh.equals(token)) return;
-        String previous = token;
-        worker.execute(() -> {
-            if (busy || !endpoint.equals(base) || !previous.equals(token) || fresh.equals(token)) return;
-            try {
-                if (fresh.isEmpty()) { sessions.clear(); token = ""; signedIn = false; }
-                else {
-                    sessions.save(endpoint, fresh, System.currentTimeMillis() + 7L * 24 * 3600 * 1000);
-                    token = fresh; signedIn = true;
-                }
-            } catch (Exception e) { message = "Não foi possível salvar a sessão neste celular."; }
-            notifyUI();
-        });
-    }
+    void invalidateSession() { sessions.clear(); token = ""; signedIn = false; message = "Sessão expirada. Entre novamente."; notifyUI(); }
     void download(String endpoint, String target, String cookies, Uri destination) {
         if (busy || !endpoint.equals(base)) return;
         busy = true; progress = 0; message = "Baixando arquivo…"; detail = ""; notifyUI();
