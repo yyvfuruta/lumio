@@ -4,6 +4,7 @@ Base path: `/api/v1`. Resources and HTTP methods follow the conventions in [REST
 
 | Method | Resource | Behavior |
 | --- | --- | --- |
+| GET | `/` | Discover API resource links (also available as `GET /api/v1`) |
 | POST | `/sessions` | Sign in using `{"password":"..."}`; returns `201`, `Location`, and an HttpOnly session cookie |
 | GET | `/sessions/current` | Current authentication state and upload limit; anonymous state is represented as `authenticated: false` |
 | DELETE | `/sessions/current` | Revoke the current session across replicas; returns `204` |
@@ -40,3 +41,11 @@ POST is used to create resources, GET to retrieve them, PATCH for partial metada
 Photo archives accept up to 1000 selected IDs, ignore duplicates, preserve original bytes, and disambiguate repeated filenames. The browser streams the ZIP directly from the returned URL. A missing/deleted selection returns `404` on creation or `409` before download; expired download URLs return `404`. Storage errors during streaming terminate the download instead of returning an apparently complete, partial ZIP.
 
 Video uploads use the same `photo` multipart field and routes. Supported formats are MP4 with H.264 video and optional AAC audio, and WebM with VP8/VP9/AV1 video and optional Opus/Vorbis audio. Files are validated using FFprobe; FFmpeg generates the JPEG thumbnail. Unsupported or invalid videos return `415`; missing server video tools return `503`. Originals and previews support HTTP byte ranges (`206`, or `416` for an unsatisfiable range), including `HEAD`, for browser playback and seeking. Originals are preserved without transcoding.
+
+## Discovery and links
+
+`GET /api/v1` and `GET /api/v1/` return resource links with `href` and `method`.
+Photo metadata includes additive `links` for self, collection, original, preview,
+thumbnail, favorite update, and deletion. Lists include self/upload links and a
+next link when another page exists; the same next URL is returned in an HTTP
+`Link: <...>; rel="next"` header. Existing response fields are unchanged.

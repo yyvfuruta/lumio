@@ -6,9 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/yyvfuruta/lumio/internal/adapters/objectstore"
 )
 
 type Config struct {
+	SkipMigrations                          bool
+	Maintenance                             bool
 	Addr, DatabaseURL, StorageURL, Password string
 	SecureCookie                            bool
 	MaxUploadBytes                          int64
@@ -41,29 +45,20 @@ func ConfigFromEnv() (Config, error) {
 	if err != nil || mb < 1 || mb > 256 {
 		return c, errors.New("LUMIO_MAX_UPLOAD_MB must be between 1 and 256")
 	}
+	c.Maintenance, err = strconv.ParseBool(env("LUMIO_MAINTENANCE", "true"))
+	if err != nil {
+		return c, errors.New("LUMIO_MAINTENANCE must be true or false")
+	}
+	autoMigrate, err := strconv.ParseBool(env("LUMIO_AUTO_MIGRATE", "true"))
+	if err != nil {
+		return c, errors.New("LUMIO_AUTO_MIGRATE must be true or false")
+	}
+	c.SkipMigrations = !autoMigrate
 	c.MaxUploadBytes = mb << 20
 	return c, nil
 }
 
-func validateStorageURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return errors.New("invalid storage URL")
-	}
-	if u.Scheme != "file" && u.Scheme != "s3" && u.Scheme != "gs" && u.Scheme != "azblob" {
-		return errors.New("storage must use file://, s3://, gs://, or azblob://")
-	}
-	if u.Query().Get("key") != "" {
-		return errors.New("single-key storage is not supported")
-	}
-	if u.Scheme == "file" && (!filepath.IsAbs(u.Path) || u.Host != "") {
-		return errors.New("local storage requires an absolute path: file:///directory")
-	}
-	if u.Scheme != "file" && u.Host == "" {
-		return errors.New("a bucket name is required")
-	}
-	return nil
-}
+func validateStorageURL(raw string) error { return objectstore.ValidateURL(raw) }
 
 func env(name, fallback string) string {
 	if s := os.Getenv(name); s != "" {

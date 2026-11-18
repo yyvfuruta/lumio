@@ -1,9 +1,8 @@
-package app
+package httpapi
 
 import (
 	"context"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,23 +10,23 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yyvfuruta/lumio/internal/core"
 )
 
 //go:embed web/*
 var assets embed.FS
 
-func (a *App) Handler() http.Handler {
+func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1", apiRoot)
+	mux.HandleFunc("GET /api/v1/{$}", apiRoot)
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
-		var current string
-		if err := a.db.QueryRow(ctx, "SELECT storage_url FROM lumio_settings WHERE id=true").Scan(&current); err != nil || current != a.cfg.StorageURL {
+		if err := a.ready(ctx); err != nil {
 			problem(w, 503, "database unavailable or storage configuration outdated")
 			return
 		}
@@ -55,6 +54,7 @@ func (a *App) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Add("Link", "</api/v1>; rel=\"index\"")
 		if r.Method != "GET" && r.Method != "HEAD" && !safeMutation(r) {
 			problem(w, 403, "request not allowed")
 			return
@@ -63,66 +63,29 @@ func (a *App) Handler() http.Handler {
 	}))
 }
 
-func (a *App) listPhotos(w http.ResponseWriter, r *http.Request) {
+func (a *API) listPhotos(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	search := q.Get("q")
-	if len(search) > 200 {
-		problem(w, 400, "search query is too long")
-		return
-	}
-	from, until, err := photoRange(q.Get("from"), q.Get("until"))
+	page, err := a.library.List(r.Context(), core.ListInput{Query: q.Get("q"), Favorite: q.Get("favorite") == "true", Cursor: q.Get("cursor"), From: q.Get("from"), Until: q.Get("until")})
 	if err != nil {
-		problem(w, 400, err.Error())
+		coreProblem(w, err)
 		return
 	}
-	before := time.Now().Add(24 * time.Hour)
-	beforeID := strings.Repeat("f", 64)
-	if cursor := q.Get("cursor"); cursor != "" {
-		raw, err := base64.RawURLEncoding.DecodeString(cursor)
-		parts := strings.Split(string(raw), "|")
-		if err != nil || len(parts) != 2 || !validID(parts[1]) {
-			problem(w, 400, "invalid cursor")
-			return
-		}
-		before, err = time.Parse(time.RFC3339Nano, parts[0])
-		if err != nil {
-			problem(w, 400, "invalid cursor")
-			return
-		}
-		beforeID = parts[1]
+	if page.NextCursor != "" {
+		q.Set("cursor", page.NextCursor)
+		w.Header().Add("Link", "</api/v1/photos?"+q.Encode()+">; rel=\"next\"")
 	}
-	rows, err := a.db.Query(r.Context(), "SELECT "+columns+` FROM lumio_photos WHERE deleted_at IS NULL AND (NOT $1::boolean OR favorite)
-	 AND strpos(lower(name),lower($2))>0 AND (added_at,id)<($3,$4)
-	 AND ($5::timestamptz IS NULL OR added_at >= $5) AND ($6::timestamptz IS NULL OR added_at < $6)
-	 ORDER BY added_at DESC,id DESC LIMIT 61`, q.Get("favorite") == "true", search, before, beforeID, from, until)
-	if err != nil {
-		internal(w, err)
-		return
+	photos := make([]photoRepresentation, 0, len(page.Photos))
+	for _, p := range page.Photos {
+		photos = append(photos, representPhoto(p))
 	}
-	defer rows.Close()
-	photos := make([]Photo, 0, 61)
-	for rows.Next() {
-		p, err := scanPhoto(rows)
-		if err != nil {
-			internal(w, err)
-			return
-		}
-		photos = append(photos, p)
+	links := map[string]resourceLink{"self": {Href: r.URL.RequestURI(), Method: "GET"}, "upload": {Href: "/api/v1/photos", Method: "POST"}}
+	if page.NextCursor != "" {
+		links["next"] = resourceLink{Href: "/api/v1/photos?" + q.Encode(), Method: "GET"}
 	}
-	if err := rows.Err(); err != nil {
-		internal(w, err)
-		return
-	}
-	next := ""
-	if len(photos) > 60 {
-		photos = photos[:60]
-		p := photos[59]
-		next = base64.RawURLEncoding.EncodeToString([]byte(p.AddedAt.Format(time.RFC3339Nano) + "|" + p.ID))
-	}
-	jsonResponse(w, 200, map[string]any{"photos": photos, "nextCursor": next})
+	jsonResponse(w, 200, map[string]any{"photos": photos, "nextCursor": page.NextCursor, "links": links})
 }
 
-func (a *App) upload(w http.ResponseWriter, r *http.Request) {
+func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	select {
 	case a.uploadGate <- struct{}{}:
 		defer func() { <-a.uploadGate }()
@@ -146,15 +109,15 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	p, duplicate, err := a.addPhoto(r.Context(), part.FileName(), part)
 	if err != nil {
 		var maxErr *http.MaxBytesError
-		if errors.Is(err, errTooLarge) || errors.As(err, &maxErr) {
+		if errors.Is(err, core.ErrTooLarge) || errors.As(err, &maxErr) {
 			problem(w, 413, "file exceeds the upload limit")
 			return
 		}
-		if errors.Is(err, errVideoTools) {
+		if errors.Is(err, core.ErrVideoTools) {
 			problem(w, 503, "video uploads require FFmpeg and FFprobe on the server")
 			return
 		}
-		if errors.Is(err, errImage) {
+		if errors.Is(err, core.ErrMedia) {
 			problem(w, 415, err.Error())
 			return
 		}
@@ -166,30 +129,19 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	w.Header().Set("Location", "/api/v1/photos/"+p.ID)
-	jsonResponse(w, status, map[string]any{"photo": p, "duplicate": duplicate})
+	jsonResponse(w, status, map[string]any{"photo": representPhoto(p), "duplicate": duplicate})
 }
 
-func (a *App) getPhoto(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validID(id) {
-		problem(w, 404, "photo not found")
-		return
-	}
-	p, err := scanPhoto(a.db.QueryRow(r.Context(), "SELECT "+columns+" FROM lumio_photos WHERE id=$1 AND deleted_at IS NULL", id))
-	if errors.Is(err, pgx.ErrNoRows) {
-		problem(w, 404, "photo not found")
-		return
-	}
+func (a *API) getPhoto(w http.ResponseWriter, r *http.Request) {
+	p, err := a.library.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		internal(w, err)
+		coreProblem(w, err)
 		return
 	}
-	jsonResponse(w, 200, p)
+	jsonResponse(w, 200, representPhoto(p))
 }
-
-func (a *App) favorite(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validID(id) {
+func (a *API) favorite(w http.ResponseWriter, r *http.Request) {
+	if !validID(r.PathValue("id")) {
 		problem(w, 404, "photo not found")
 		return
 	}
@@ -203,68 +155,29 @@ func (a *App) favorite(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "provide favorite as true or false")
 		return
 	}
-	p, err := scanPhoto(a.db.QueryRow(r.Context(), "UPDATE lumio_photos SET favorite=$2 WHERE id=$1 AND deleted_at IS NULL RETURNING "+columns, id, *input.Favorite))
-	if errors.Is(err, pgx.ErrNoRows) {
-		problem(w, 404, "photo not found")
-		return
-	}
+	p, err := a.library.Favorite(r.Context(), r.PathValue("id"), *input.Favorite)
 	if err != nil {
-		internal(w, err)
+		coreProblem(w, err)
 		return
 	}
-	jsonResponse(w, 200, p)
+	jsonResponse(w, 200, representPhoto(p))
 }
-
-func (a *App) deletePhoto(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validID(id) {
-		problem(w, 404, "photo not found")
-		return
-	}
-	// Use the same advisory lock as uploads and garbage collection.
-	tx, err := a.db.Begin(r.Context())
-	if err != nil {
-		internal(w, err)
-		return
-	}
-	defer tx.Rollback(context.Background())
-	if err := a.storageGuard(r.Context(), tx); err != nil {
-		internal(w, err)
-		return
-	}
-	if err := photoLock(r.Context(), tx, id); err != nil {
-		internal(w, err)
-		return
-	}
-	tag, err := tx.Exec(r.Context(), "UPDATE lumio_photos SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL", id)
-	if err != nil {
-		internal(w, err)
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		problem(w, 404, "photo not found")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		internal(w, err)
+func (a *API) deletePhoto(w http.ResponseWriter, r *http.Request) {
+	if err := a.library.Delete(r.Context(), r.PathValue("id")); err != nil {
+		coreProblem(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-func (a *App) media(w http.ResponseWriter, r *http.Request) {
+func (a *API) media(w http.ResponseWriter, r *http.Request) {
 	id, kind := r.PathValue("id"), r.PathValue("kind")
 	if !validID(id) || (kind != "original" && kind != "thumbnail" && kind != "preview") {
 		problem(w, 404, "photo not found")
 		return
 	}
-	p, err := scanPhoto(a.db.QueryRow(r.Context(), "SELECT "+columns+" FROM lumio_photos WHERE id=$1 AND deleted_at IS NULL", id))
-	if errors.Is(err, pgx.ErrNoRows) {
-		problem(w, 404, "photo not found")
-		return
-	}
+	p, err := a.library.Get(r.Context(), id)
 	if err != nil {
-		internal(w, err)
+		coreProblem(w, err)
 		return
 	}
 	key, typ, size := "original", p.Type, p.Size
@@ -274,12 +187,12 @@ func (a *App) media(w http.ResponseWriter, r *http.Request) {
 	if kind == "preview" && p.PreviewSize > 0 {
 		key, typ, size = "preview.jpg", "image/jpeg", p.PreviewSize
 	}
-	reader, err := a.bucket.NewReader(r.Context(), id+"/"+key, nil)
+	reader, err := a.library.Open(r.Context(), id+"/"+key, 0)
 	if err != nil {
 		internal(w, err)
 		return
 	}
-	content := &blobReadSeeker{ctx: r.Context(), bucket: a.bucket, key: id + "/" + key, size: size, reader: reader}
+	content := &blobReadSeeker{ctx: r.Context(), objects: a.library, key: id + "/" + key, size: size, reader: reader}
 	defer content.Close()
 	w.Header().Set("Content-Type", typ)
 	if r.URL.Query().Get("download") == "1" {
@@ -323,4 +236,18 @@ func problem(w http.ResponseWriter, status int, message string) {
 func internal(w http.ResponseWriter, err error) {
 	slog.Error("request failed", "error", err)
 	problem(w, 500, "could not complete the request; try again")
+}
+
+func coreProblem(w http.ResponseWriter, err error) {
+	var input *core.InputError
+	switch {
+	case errors.As(err, &input):
+		problem(w, 400, err.Error())
+	case errors.Is(err, core.ErrNotFound):
+		problem(w, 404, "photo not found")
+	case errors.Is(err, core.ErrArchiveNotFound):
+		problem(w, 404, "archive not found or expired")
+	default:
+		internal(w, err)
+	}
 }

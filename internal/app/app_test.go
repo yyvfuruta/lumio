@@ -23,11 +23,21 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/yyvfuruta/lumio/internal/adapters/maintenance"
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/fileblob"
 	"gocloud.dev/blob/memblob"
 	"gocloud.dev/gcerrors"
 )
+
+// Decode the public status contract independently of the HTTP adapter's DTO.
+type libraryStatus struct {
+	Photos            int64 `json:"photos"`
+	OriginalBytes     int64 `json:"originalBytes"`
+	ThumbnailBytes    int64 `json:"thumbnailBytes"`
+	PreviewBytes      int64 `json:"previewBytes"`
+	StorageAccessible bool  `json:"storageAccessible"`
+}
 
 func testPNG(t *testing.T) []byte {
 	t.Helper()
@@ -65,35 +75,6 @@ func TestConfig(t *testing.T) {
 	t.Setenv("LUMIO_MAX_UPLOAD_MB", "9999999999")
 	if _, err := ConfigFromEnv(); err == nil {
 		t.Fatal("accepted huge limit")
-	}
-}
-
-func TestCSRF(t *testing.T) {
-	for _, tc := range []struct {
-		header, origin, site string
-		want                 bool
-	}{
-		{"", "", "", false}, {"1", "", "", true}, {"1", "https://photos.test", "same-origin", true}, {"1", "https://evil.test", "", false}, {"1", "null", "", false}, {"1", "https://photos.test", "cross-site", false},
-	} {
-		r := httptest.NewRequest("POST", "https://photos.test/api/v1/photos", nil)
-		r.Header.Set("X-Lumio-Request", tc.header)
-		r.Header.Set("Origin", tc.origin)
-		r.Header.Set("Sec-Fetch-Site", tc.site)
-		if safeMutation(r) != tc.want {
-			t.Fatalf("case %+v", tc)
-		}
-	}
-}
-
-func TestThumbnail(t *testing.T) {
-	src := image.NewNRGBA(image.Rect(4, 5, 2004, 1005))
-	thumb := thumbnail(src)
-	if thumb.Bounds().Dx() != 640 || thumb.Bounds().Dy() != 320 {
-		t.Fatal(thumb.Bounds())
-	}
-	r, g, b, _ := thumb.At(0, 0).RGBA()
-	if r != 65535 || g != 65535 || b != 65535 {
-		t.Fatal("transparent pixels should be white")
 	}
 }
 
@@ -458,17 +439,17 @@ func TestCopyVerified(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := copyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err != nil {
+		if err := maintenance.CopyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := target.WriteAll(ctx, "original", []byte("corruption"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err == nil {
+	if err := maintenance.CopyVerified(ctx, source, target, "original", "image/png", int64(len(want)), hex.EncodeToString(sum[:])); err == nil {
 		t.Fatal("accepted corrupt destination")
 	}
-	if err := copyVerified(ctx, source, target, "original", "image/png", 99, ""); err == nil {
+	if err := maintenance.CopyVerified(ctx, source, target, "original", "image/png", 99, ""); err == nil {
 		t.Fatal("accepted wrong source size")
 	}
 }

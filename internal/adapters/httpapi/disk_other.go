@@ -1,5 +1,5 @@
 //go:build !linux && !darwin
 
-package app
+package httpapi
 
 func diskUsage(path string) (*DiskUsage, error) { return nil, nil }

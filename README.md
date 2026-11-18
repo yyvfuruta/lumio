@@ -61,6 +61,18 @@ docker compose down
 
 Stopping the services preserves their volumes. `docker compose down -v` deletes the development data.
 
+## CLI and Android
+
+The separate `lumio-cli` binary supports login, uploads, downloads, listing,
+favorites, deletion, and status. `make build` builds the server and client;
+release archives include both. Run `lumio-cli help` or see the [CLI guide](docs/cli.md).
+The native [Android uploader](android/README.md) selects photos/videos from your
+phone and sends them to your server. Build an installable APK with `make android-apk`.
+
+The backend separates its core use cases from PostgreSQL, object storage, and
+media processing through ports. See [architecture and the twelve-factor deployment
+contract](docs/architecture.md).
+
 ## Configuration
 
 All application configuration is provided through environment variables.
@@ -69,6 +81,8 @@ All application configuration is provided through environment variables.
 | --- | --- | --- |
 | `DATABASE_URL` | required | PostgreSQL connection URL |
 | `LUMIO_PASSWORD` | required | Login password; at least 16 characters |
+| `LUMIO_AUTO_MIGRATE` | `true` | Initialize schema at startup; set `false` after running `lumio migrate` separately |
+| `LUMIO_MAINTENANCE` | `true` | Run cleanup in the web process; set `false` when using a dedicated `lumio worker` |
 | `LUMIO_ADDR` | `:8080` | HTTP listen address |
 | `LUMIO_STORAGE_URL` | local directory | Storage backend URL |
 | `LUMIO_DATA_DIR` | `data` | Local directory when the storage URL is unset |

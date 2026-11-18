@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package app
+package httpapi
 
 import "syscall"
 

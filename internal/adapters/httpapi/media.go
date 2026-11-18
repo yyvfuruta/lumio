@@ -1,21 +1,21 @@
-package app
+package httpapi
 
 import (
 	"context"
 	"errors"
 	"io"
-
-	"gocloud.dev/blob"
 )
 
 // A seek opens a new ranged blob reader instead of buffering the original.
 // ServeContent can therefore serve video byte ranges for every storage backend.
 type blobReadSeeker struct {
-	ctx            context.Context
-	bucket         *blob.Bucket
+	ctx     context.Context
+	objects interface {
+		Open(context.Context, string, int64) (io.ReadCloser, error)
+	}
 	key            string
 	size, position int64
-	reader         *blob.Reader
+	reader         io.ReadCloser
 }
 
 func (r *blobReadSeeker) Read(p []byte) (int, error) {
@@ -24,7 +24,7 @@ func (r *blobReadSeeker) Read(p []byte) (int, error) {
 	}
 	if r.reader == nil {
 		var err error
-		r.reader, err = r.bucket.NewRangeReader(r.ctx, r.key, r.position, -1, nil)
+		r.reader, err = r.objects.Open(r.ctx, r.key, r.position)
 		if err != nil {
 			return 0, err
 		}

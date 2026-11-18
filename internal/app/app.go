@@ -2,34 +2,36 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	_ "embed"
-	"errors"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/yyvfuruta/lumio/internal/adapters/httpapi"
+	"github.com/yyvfuruta/lumio/internal/adapters/media"
+	"github.com/yyvfuruta/lumio/internal/adapters/objectstore"
+	"github.com/yyvfuruta/lumio/internal/adapters/postgres"
+	"github.com/yyvfuruta/lumio/internal/core"
 	"gocloud.dev/blob"
 )
 
-//go:embed schema.sql
-var schema string
-
 type App struct {
-	cfg         Config
-	db          *pgxpool.Pool
-	bucket      *blob.Bucket
-	passwordTag [32]byte
-	uploadGate  chan struct{}
-	cancel      context.CancelFunc
-	workers     sync.WaitGroup
+	cfg      Config
+	db       *pgxpool.Pool
+	bucket   *blob.Bucket
+	repo     *postgres.Repository
+	library  *core.Library
+	accounts *core.Accounts
+	handler  http.Handler
+	cancel   context.CancelFunc
+	workers  sync.WaitGroup
 }
 
 func New(cfg Config) (*App, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	db, err := postgres.Connect(ctx, cfg.DatabaseURL, cfg.StorageURL, !cfg.SkipMigrations)
 	if err != nil {
 		return nil, err
 	}
@@ -39,42 +41,21 @@ func New(cfg Config) (*App, error) {
 			db.Close()
 		}
 	}()
-	if err := db.Ping(ctx); err != nil {
-		return nil, err
-	}
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(739421016)"); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, schema); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, "INSERT INTO lumio_settings(id,storage_url) VALUES(true,$1) ON CONFLICT DO NOTHING", cfg.StorageURL); err != nil {
-		return nil, err
-	}
-	var stored string
-	if err := tx.QueryRow(ctx, "SELECT storage_url FROM lumio_settings WHERE id=true").Scan(&stored); err != nil {
-		return nil, err
-	}
-	if stored != cfg.StorageURL {
-		return nil, errors.New("storage does not match PostgreSQL settings; run migrate-storage before switching backends")
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
 	bucket, err := openBucket(ctx, cfg.StorageURL)
 	if err != nil {
 		return nil, err
 	}
-	a := &App{cfg: cfg, db: db, bucket: bucket, passwordTag: sha256.Sum256([]byte(cfg.Password)), uploadGate: make(chan struct{}, 1)}
+	a := &App{cfg: cfg, db: db, bucket: bucket}
+	a.repo = postgres.New(db, cfg.StorageURL)
+	a.library = core.NewLibrary(a.repo, objectstore.New(bucket), media.Processor{})
+	a.accounts = core.NewAccounts(a.repo, cfg.Password)
+	a.handler = httpapi.New(httpapi.Config{StorageURL: cfg.StorageURL, SecureCookie: cfg.SecureCookie, MaxUploadBytes: cfg.MaxUploadBytes}, a.library, a.accounts, a.repo.Ready)
 	background, cancelWorker := context.WithCancel(context.Background())
 	a.cancel = cancelWorker
-	a.workers.Add(1)
-	go a.maintenance(background)
+	if cfg.Maintenance {
+		a.workers.Add(1)
+		go a.maintenance(background)
+	}
 	ok = true
 	return a, nil
 }
@@ -101,13 +82,7 @@ func (a *App) maintenance(ctx context.Context) {
 			}
 		}
 		cleanup, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_, err := a.db.Exec(cleanup, "DELETE FROM lumio_sessions WHERE expires_at<now()")
-		if err == nil {
-			_, err = a.db.Exec(cleanup, "DELETE FROM lumio_login_limits WHERE minute<now()-interval '5 minutes'")
-		}
-		if err == nil {
-			_, err = a.db.Exec(cleanup, "DELETE FROM lumio_photo_archives WHERE expires_at<now()")
-		}
+		err := a.repo.Prune(cleanup)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			slog.Error("session cleanup failed", "error", err)
@@ -119,3 +94,5 @@ func (a *App) maintenance(ctx context.Context) {
 		}
 	}
 }
+
+func (a *App) Handler() http.Handler { return a.handler }

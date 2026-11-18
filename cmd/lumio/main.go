@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yyvfuruta/lumio/internal/adapters/postgres"
 	"github.com/yyvfuruta/lumio/internal/app"
 )
 
@@ -19,7 +20,7 @@ var commit = "none"
 var date = "unknown"
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if err := run(); err != nil {
 		slog.Error("lumio stopped", "error", err)
 		os.Exit(1)
@@ -30,16 +31,68 @@ func run() error {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version":
+			if len(os.Args) != 2 {
+				return errors.New("version accepts no arguments")
+			}
 			fmt.Printf("lumio %s (%s, %s)\n", version, commit, date)
 			return nil
+		case "migrate":
+			if len(os.Args) != 2 {
+				return errors.New("migrate accepts no arguments")
+			}
+			cfg, err := app.ConfigFromEnv()
+			if err != nil {
+				return err
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			db, err := postgres.Open(ctx, cfg.DatabaseURL, cfg.StorageURL)
+			if err != nil {
+				return err
+			}
+			db.Close()
+			return nil
+		case "worker":
+			slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+			if len(os.Args) != 2 {
+				return errors.New("worker uses environment configuration and accepts no arguments")
+			}
+			cfg, err := app.ConfigFromEnv()
+			if err != nil {
+				return err
+			}
+			cfg.Maintenance = true
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			a, err := app.New(cfg)
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+			slog.Info("lumio worker started")
+			<-ctx.Done()
+			return nil
 		case "migrate-storage":
+			if len(os.Args) != 2 {
+				return errors.New("migrate-storage accepts no arguments")
+			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return app.MigrateStorage(ctx, os.Getenv("DATABASE_URL"), os.Getenv("LUMIO_MIGRATE_TO"))
+		case "serve":
+			if len(os.Args) != 2 {
+				return errors.New("serve uses environment configuration and accepts no arguments")
+			}
+		case "help", "--help", "-h":
+			fmt.Println("Usage: lumio [serve|worker|migrate|migrate-storage|version]\nRemote client: lumio-cli help")
+			return nil
 		default:
-			return errors.New("use lumio, lumio version, or lumio migrate-storage")
+			return fmt.Errorf("unknown server command %q; use lumio help or lumio-cli help", os.Args[1])
 		}
 	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg, err := app.ConfigFromEnv()
 	if err != nil {
 		return err

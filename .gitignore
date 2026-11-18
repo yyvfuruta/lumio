@@ -1,5 +1,6 @@
 /data/
 /lumio
+/lumio-cli
 /.env
 /.env.*
 !/.env.example

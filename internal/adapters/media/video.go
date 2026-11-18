@@ -1,4 +1,4 @@
-package app
+package media
 
 import (
 	"bytes"
@@ -12,9 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yyvfuruta/lumio/internal/core"
 )
 
-var errVideoTools = errors.New("FFmpeg and FFprobe are required for video uploads")
+var errVideoTools = core.ErrVideoTools
 
 // Bound the subprocess output as well as runtime; only local, supported containers
 // are permitted, so an uploaded file cannot fetch external playlists or URLs.

@@ -24,3 +24,10 @@ The bucket overlay runs two replicas without a photo PVC. All replicas must shar
 Adapt `deploy/k8s/ingress.example.yaml` to your ingress controller, hostname, and TLS setup. Preserve the browser's Host header, allow request bodies of at least the upload limit plus 1 MiB multipart overhead, and allow up to two minutes for an upload. For plain HTTP port-forwarding, temporarily set `LUMIO_SECURE_COOKIE=false`.
 
 `/livez` reports that HTTP is running. `/readyz` checks PostgreSQL and the registered storage configuration; it does not probe bucket permissions on every request. Uploads detect bucket permission or availability failures. The authenticated status panel checks bucket accessibility on demand. Filesystem usage shows the entire mounted filesystem, including files outside Lumio; bucket capacity/quota is not exposed as filesystem capacity.
+
+For separate schema administration, run `lumio migrate` from the same release
+before rolling out web/workers, then set `LUMIO_AUTO_MIGRATE=false` on their
+containers. A runtime database role can then omit DDL privileges. Set
+`LUMIO_MAINTENANCE=false` on web replicas if a separate deployment runs
+`lumio worker`; workers need no HTTP Service. See the
+[operating contract](architecture.md#twelve-factor-deployment).
