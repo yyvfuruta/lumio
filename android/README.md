@@ -1,7 +1,11 @@
 # Lumio for Android
 
-A native Java uploader for Android 8.0+ (API 26). It connects to the same HTTP API
-as the web interface and CLI. There are no third-party runtime dependencies.
+An Android client for Android 8.0+ (API 26). Its **Biblioteca** tab displays the
+server's actual responsive web frontend in a WebView, keeping the same gallery,
+upload-date timeline, search, favorites, light/dark/system themes, photo viewer,
+video player, selection, deletion, and library status as the browser. The
+**Envios** tab retains the native uploader and its persistent pending queue.
+There are no third-party runtime dependencies.
 
 ## Install and use
 
@@ -14,34 +18,51 @@ adb install -r dist/lumio-android.apk
 ```
 
 1. Enter your Lumio URL, for example `https://photos.example.com`, and password.
-2. Tap **Conectar ao servidor**, then **Selecionar fotos e vídeos**.
-3. Choose files using Android's system file picker, then tap **Enviar para o Lumio**.
+2. After signing in, the app opens **Biblioteca**, using the same interface as the web.
+3. Browse your photos/videos, search, use the date timeline or favorites, and tap
+   a thumbnail to open its viewer. The library menu includes appearance and status.
+4. Tap the web interface's upload button to select photos/videos with Android's
+   system picker. Originals and selection ZIPs open Android's Save dialog.
+5. Use **Envios** for the native upload queue/retries, or the app's ⋮ menu to
+   refresh the library or configure another server.
 
-Keep the app open during uploads. The screen stays awake while a request is in
-progress. Rotation retains the active operation. The pending selection is saved
-with persistent read permissions; after process termination, reopen the app and
-tap Send to retry it. Completed files are removed from the queue, failures remain
-selected, and retrying an uncertain upload is safe because the server deduplicates
-original bytes. This version does not perform automatic background backups.
+The Android Back button closes the viewer, menus, or selection before leaving
+the library. Video fullscreen is supported. Rotation keeps the WebView and active
+file picker intact. Errors opening the server show Retry and server settings.
+The native chrome follows the library's theme. The phone stays awake during
+uploads; keep the app open until they finish. There are no automatic background
+backups or offline gallery. Update Android System WebView for current web support.
 
-The server validates supported formats and enforces its per-file limit, including
-for videos (32 MiB by default). The app reads that limit after login and checks
-known sizes before sending. Network requests run off the UI thread, stream files
-without buffering them in memory, and show per-file progress/results.
+The web interface is loaded directly from your configured server, so frontend
+updates reach Android without shipping a second copy of its HTML/CSS/JS in the
+APK. The interface therefore matches the version running on your server.
 
-Use an address reachable from your phone. `localhost` on the phone points to the
-phone, not your computer. Compose binds port 8080 to loopback by default. For LAN
-testing, publish it on an appropriate interface with your own Compose override,
-use your computer's LAN address, select **Permitir HTTP na rede local**, and set
+Native uploads preserve their pending selection with persistent read permissions.
+After process termination, reopen **Envios** and retry. Successful files leave
+the queue, failures remain, and uncertain retries are deduplicated by the server.
+The library refreshes after native uploads. Uploads started in the web interface
+use its existing per-file validation/retry flow and do not enter the native queue.
+The server's format and upload limits apply to both flows (32 MiB by default).
+
+Downloads stream originals and ZIPs to a destination selected with Android's
+Storage Access Framework. They reuse the library's session, reject redirects and
+foreign origins, verify declared response lengths, and remove partial documents
+when the provider allows it. No broad storage/gallery permission is required.
+
+Use a server address reachable from your phone. `localhost` on the phone refers
+to the phone. Compose binds port 8080 to loopback by default. For LAN testing,
+publish it on an appropriate interface with a Compose override, use the computer's
+LAN address, select **Permitir HTTP na rede local**, and set
 `LUMIO_SECURE_COOKIE=false` on that development server. Use HTTPS for normal use.
-The app uses Android's certificate trust and rejects redirects; self-signed
-certificates are not silently accepted.
 
-Only Internet access is requested. The system picker grants access to selected
-files without broad gallery/storage permissions. Session credentials are encrypted
-using an AES-GCM key in Android Keystore and bound to their server URL. Passwords
-are not saved; app backup is disabled. Sign out attempts server revocation and
-always removes the local credential, reporting if server revocation failed.
+Only Internet access is requested. HTTPS uses Android's certificate trust;
+certificate errors are rejected. The WebView is restricted to the configured
+origin, rejects mixed content, disables file-URL access, third-party cookies,
+popups, and JavaScript-to-native interfaces. Selected content URIs are supplied
+only through the system picker. An encrypted session snapshot in Android Keystore
+restores native authentication; the WebView also maintains its own cookie store
+inside the app's private storage. Browser session changes synchronize back to
+the native uploader. Passwords are not saved; app backup is disabled.
 
 ## Build
 
@@ -67,7 +88,8 @@ passed to the signer by environment variable. CI builds use development keys;
 those artifacts are for testing, not stable release updates.
 
 `android/test.sh` runs JVM transport tests for login, cookies, multipart streaming
-with known/unknown sizes, unsafe URLs, and redirects. Server integration tests
+with known/unknown sizes, origin isolation, download allowlists, authenticated
+original/ZIP streaming, redirects, and interrupted transfers. Server integration tests
 exercise the API against PostgreSQL and local/S3 storage. These do not replace
 on-device testing of the picker, Keystore, lifecycle, or device-specific UI.
 

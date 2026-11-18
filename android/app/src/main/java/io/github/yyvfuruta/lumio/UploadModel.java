@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
+import android.provider.DocumentsContract;
+import java.io.OutputStream;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.InputStream;
@@ -28,8 +30,10 @@ final class UploadModel {
     volatile String detail = "";
     volatile int progress;
     volatile long maxBytes = 32L << 20;
-    private String base;
-    private String token;
+    volatile int libraryRevision;
+    volatile int loginRevision;
+    private volatile String base;
+    private volatile String token;
 
     UploadModel(Context context) {
         this.context = context.getApplicationContext();
@@ -72,6 +76,7 @@ final class UploadModel {
                 prefs.edit().putString("url", endpoint).apply();
                 if (!oldToken.isEmpty()) try { new LumioApi(oldBase, oldToken).json("/api/v1/sessions/current", "DELETE", null); } catch (Exception ignored) { }
                 refreshLimit();
+                loginRevision++;
                 message = "Conectado. Suas fotos continuam no seu servidor.";
             } catch (Exception e) { message = describe(e); }
             finally { busy = false; notifyUI(); }
@@ -150,8 +155,51 @@ final class UploadModel {
                 message = sent + " enviado(s) · " + duplicate + " já existente(s) · " + failures + " falha(s).";
                 if (count() > 0) message += " Os pendentes podem ser reenviados.";
                 detail = log.toString();
+                if (sent > 0) libraryRevision++;
             } catch (Exception e) { message = describe(e); }
             finally { busy = false; notifyUI(); }
+        });
+    }
+    String endpoint() { return base; }
+    String sessionToken() { return token; }
+    void adoptBrowserSession(String endpoint, String cookies) {
+        if (busy || !endpoint.equals(base) || worker.isShutdown()) return;
+        String fresh = WebPolicy.sessionToken(cookies);
+        if (fresh.equals(token)) return;
+        String previous = token;
+        worker.execute(() -> {
+            if (busy || !endpoint.equals(base) || !previous.equals(token) || fresh.equals(token)) return;
+            try {
+                if (fresh.isEmpty()) { sessions.clear(); token = ""; signedIn = false; }
+                else {
+                    sessions.save(endpoint, fresh, System.currentTimeMillis() + 7L * 24 * 3600 * 1000);
+                    token = fresh; signedIn = true;
+                }
+            } catch (Exception e) { message = "Não foi possível salvar a sessão neste celular."; }
+            notifyUI();
+        });
+    }
+    void download(String endpoint, String target, String cookies, Uri destination) {
+        if (busy || !endpoint.equals(base)) return;
+        busy = true; progress = 0; message = "Baixando arquivo…"; detail = ""; notifyUI();
+        worker.execute(() -> {
+            try (OutputStream out = context.getContentResolver().openOutputStream(destination, "w")) {
+                if (out == null) throw new Exception("Não foi possível abrir o arquivo de destino.");
+                final long[] lastUpdate = {0};
+                MediaDownload.save(endpoint, target, cookies, out, (bytes, total) -> {
+                    if (bytes - lastUpdate[0] < 256 * 1024 && bytes != total) return;
+                    lastUpdate[0] = bytes;
+                    progress = total > 0 ? (int) Math.min(100, bytes * 100 / total) : 0;
+                    message = "Baixando arquivo… " + (bytes / 1024) + " KiB";
+                    notifyUI();
+                });
+                // A provider close can still fail; success is set after closing below.
+            } catch (Exception e) {
+                message = describe(e);
+                try { DocumentsContract.deleteDocument(context.getContentResolver(), destination); } catch (Exception ignored) { }
+                busy = false; notifyUI(); return;
+            }
+            progress = 100; message = "Arquivo salvo no local escolhido."; busy = false; notifyUI();
         });
     }
     static String describe(Exception e) {
