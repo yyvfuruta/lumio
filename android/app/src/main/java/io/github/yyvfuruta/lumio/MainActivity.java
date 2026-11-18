@@ -183,7 +183,7 @@ public final class MainActivity extends Activity implements UploadModel.Observer
                     catch (android.content.ActivityNotFoundException e) { downloadURL = null; downloadServer = null; Toast.makeText(MainActivity.this, "Nenhum local de salvamento disponível.", Toast.LENGTH_LONG).show(); }
                 }
                 @Override public void logout() { if (!model.busy) model.logout(); }
-                @Override public void expired() { model.invalidateSession(); }
+                @Override public void expired(String server, String token) { if (server.equals(model.endpoint()) && token.equals(model.sessionToken())) model.invalidateSession(); }
                 @Override public void theme(GalleryTheme theme) { applyChromeTheme(theme); }
             });
             panels.addView(gallery, new FrameLayout.LayoutParams(-1, -1));

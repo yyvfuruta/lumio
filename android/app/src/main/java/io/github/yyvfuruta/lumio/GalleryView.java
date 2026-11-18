@@ -40,7 +40,7 @@ import java.util.Locale;
 /** Native Android gallery, mirroring the web library's layout and operations. */
 final class GalleryView extends LinearLayout implements GalleryModel.Observer {
     interface Host {
-        void upload(); void download(String target, String name, String mime); void logout(); void expired(); void theme(GalleryTheme theme);
+        void upload(); void download(String target, String name, String mime); void logout(); void expired(String server, String token); void theme(GalleryTheme theme);
     }
     private final Activity activity;
     private final UploadModel uploads;
@@ -157,7 +157,7 @@ final class GalleryView extends LinearLayout implements GalleryModel.Observer {
         if (showingStatus) renderStatus();
         if (viewer != null && viewer.isShowing()) viewer.refresh();
     }
-    @Override public void expired() { host.expired(); }
+    @Override public void expired() { host.expired(model.server, model.token); }
     private void rebuildRows() {
         rows.clear(); LinkedHashMap<String, List<Photo>> groups = new LinkedHashMap<>();
         for (Photo p : model.photos) { String day = LibraryDates.day(p.addedAt, model.zone); groups.computeIfAbsent(day, key -> new ArrayList<>()).add(p); }

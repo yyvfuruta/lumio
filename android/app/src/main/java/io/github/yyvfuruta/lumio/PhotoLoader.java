@@ -37,6 +37,10 @@ final class PhotoLoader {
         worker.execute(() -> {
             File spool = null;
             try {
+                ImageView current = image.get(); if (closed || current == null || !key.equals(current.getTag())) return;
+                current = null;
+                Bitmap cached = cache.get(key);
+                if (cached != null) { main.post(() -> { ImageView view = image.get(); if (!closed && view != null && key.equals(view.getTag())) { view.setImageBitmap(cached); TextView label = problem.get(); if (label != null) label.setVisibility(View.GONE); } }); return; }
                 spool = File.createTempFile("lumio-view-", ".media", context.getCacheDir());
                 try (FileOutputStream out = new FileOutputStream(spool)) { MediaDownload.media(server, server + "/api/v1/photos/" + key, cookies, out, preview ? 256L << 20 : 4L << 20); }
                 BitmapFactory.Options options = new BitmapFactory.Options(); options.inJustDecodeBounds = true; BitmapFactory.decodeFile(spool.getPath(), options);

@@ -57,7 +57,12 @@ public final class LibraryTest {
                     throw new AssertionError("unsafe or incomplete download accepted: " + target);
                 } catch (java.io.IOException expected) { }
             }
-            if (downloaded.get() != 1) throw new AssertionError("followed redirect or leaked credential");
+            if (!MediaPolicy.mediaAllowed(base, base + "/api/v1/photos/" + id + "/preview") || MediaPolicy.downloadAllowed(base, base + "/api/v1/photos/" + id + "/preview")) throw new AssertionError("media/download route separation");
+            try {
+                MediaDownload.media(base, base + path, "lumio_session=" + token, new ByteArrayOutputStream(), 2);
+                throw new AssertionError("image byte limit ignored");
+            } catch (java.io.IOException expected) { }
+            if (downloaded.get() != 2) throw new AssertionError("followed redirect or leaked credential");
             System.out.println("Android library/download tests passed");
         } finally { server.stop(0); }
     }
